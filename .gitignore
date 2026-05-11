@@ -1,0 +1,32 @@
+# Build output
+build/
+dist/
+out/
+*.o
+
+# Node
+node_modules/
+.next/
+.turbo/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.mypy_cache/
+
+# Editor / OS
+.DS_Store
+.vscode/
+.idea/
+*.swp
+
+# Env
+.env
+.env.local
+.env.*.local
+
+# Engine runtime
+*.db
+*.db-wal
+*.db-shm
