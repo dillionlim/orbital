@@ -1,6 +1,9 @@
 import Link from 'next/link';
 import { SignedIn, SignedOut, SignInButton, SignUpButton, UserButton } from '@clerk/nextjs';
 
+// required by @cloudflare/next-on-pages bcos clerk turns this into dynamic routing
+export const runtime = 'edge';
+
 export default function Home() {
   return (
     <main style={{ padding: '4rem', fontFamily: 'system-ui, sans-serif' }}>

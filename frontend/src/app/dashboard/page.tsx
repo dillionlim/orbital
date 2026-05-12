@@ -2,8 +2,13 @@ import Link from 'next/link';
 import { auth, currentUser } from '@clerk/nextjs/server';
 import { UserButton } from '@clerk/nextjs';
 
+// Required by @cloudflare/next-on-pages: auth() / currentUser() make
+// this a dynamic server route, which Cloudflare Pages runs on the Edge
+// Runtime (not Node).
+export const runtime = 'edge';
+
 // middleware already redirected anon users away,
-// so by the time we render here, 
+// so by the time we render here,
 // userId is guaranteed to be set.
 export default async function DashboardPage() {
   const { userId } = await auth();
