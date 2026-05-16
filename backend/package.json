@@ -5,15 +5,19 @@
   "private": true,
   "scripts": {
     "build": "nest build",
-    "start": "nest start",
-    "start:dev": "nest start --watch",
+    "start": "npx prisma generate && nest start",
+    "start:dev": "npx prisma generate && nest start --watch",
     "start:debug": "nest start --debug --watch",
-    "start:prod": "node dist/main"
+    "start:prod": "node dist/main",
+    "generate:down": "npx prisma migrate diff  --from-schema prisma/schema.prisma  --to-config-datasource prisma.config.ts  --script > down.sql",
+    "generate:migration": "npx prisma migrate dev --create-only && ./scripts/copy_down_sql.sh"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.0",
     "@nestjs/core": "^11.0.0",
     "@nestjs/platform-express": "^11.0.0",
+    "@prisma/client": "^7.2.0",
+    "prisma": "^7.2.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1"
   },
