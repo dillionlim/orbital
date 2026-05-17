@@ -1,17 +1,27 @@
-import { Controller, Post, Req } from '@nestjs/common';
+import { Controller, Post, UseGuards, Req } from '@nestjs/common';
 import { UsersService } from './users.service';
+import { ClerkAuthGuard } from '../auth/clerk-auth.guard';
 import { Request } from 'express';
 import { User, ApiKey } from '@prisma/client';
+
+interface ClerkClaims {
+  email?: string;
+  username?: string;
+  preferred_username?: string;
+  given_name?: string;
+  family_name?: string;
+}
 
 interface AuthenticatedRequest extends Request {
   auth: {
     userId: string;
     sessionId: string;
-    claims: any;
+    claims: ClerkClaims;
   };
 }
 
 @Controller('users')
+@UseGuards(ClerkAuthGuard)
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
