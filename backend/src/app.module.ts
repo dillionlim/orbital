@@ -7,6 +7,7 @@ import { PrismaService } from './prisma.service';
 import { ApiKeyModule } from './api-keys/api-key.module';
 import { TradingModule } from './trading/trading.module';
 import { UsersModule } from './users/users.module';
+import { NewsModule } from './news/news.module';
 
 @Module({
   imports: [
@@ -15,6 +16,7 @@ import { UsersModule } from './users/users.module';
     ApiKeyModule,
     TradingModule,
     UsersModule,
+    NewsModule
   ],
   controllers: [AppController],
   providers: [AppService, PrismaService],
