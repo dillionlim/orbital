@@ -45,7 +45,7 @@ export default function BubblesIcon(props: SVGProps<SVGSVGElement>) {
         <path d="M3198.44 490.5C3248.69 490.465 3289.46 531.402 3289.5 581.936 3289.5 582.078 3289.5 582.221 3289.5 582.363" stroke="currentColor" strokeWidth="20.625" strokeMiterlimit="8" fill="none" />
         <path d="M90.9363 0C141.194-0.0354436 181.965 40.9017 182 91.4357 182 91.5781 182 91.7206 181.999 91.863" stroke="currentColor" strokeWidth="20.625" strokeMiterlimit="8" fill="none" transform="matrix(-1 0 0 1 3471.5 490.5)" />
         <path d="M90.9364 0C141.194-0.0350575 181.965 40.6786 182 90.9366 182 91.0788 182 91.2209 181.999 91.3631" stroke="currentColor" strokeWidth="20.625" strokeMiterlimit="8" fill="none" transform="matrix(1 0 0 -1 3107.5 490.5)" />
-        <path d="M3380.56 490.5C3330.31 490.535 3289.53 449.821 3289.5 399.563 3289.5 399.421 3289.5 399.279 3289.5 399.137" stroke="currentColor" strokeWidth="20.625" stroke-miterlimit="8" fill="none" />
+        <path d="M3380.56 490.5C3330.31 490.535 3289.53 449.821 3289.5 399.563 3289.5 399.421 3289.5 399.279 3289.5 399.137" stroke="currentColor" strokeWidth="20.625" strokeMiterlimit="8" fill="none" />
 
       </g>
     </svg>

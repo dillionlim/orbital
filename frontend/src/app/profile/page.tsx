@@ -130,9 +130,7 @@ export default function ProfilePage() {
                 )}
               </div>
               
-              <p className="mt-4 text-[11px] text-slate-500 italic">
-                * Warning: Regenerating your key will not invalidate old ones in this demo, but you should only use the latest live key for your trading bot.
-              </p>
+  
             </section>
           </div>
         </div>
