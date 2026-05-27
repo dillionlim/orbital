@@ -1,9 +1,11 @@
 'use client';
 
 import React from 'react';
-import { TrendingUp, Shield, Zap, ArrowRight, Activity } from 'lucide-react';
+import { TrendingUp, Shield, Zap, ArrowRight } from 'lucide-react';
 import { SignInButton, useUser } from '@clerk/nextjs';
 import Link from 'next/link';
+
+import BubblesIcon from '../components/BubblesIcon';
 
 export default function LandingPage() {
   const { isSignedIn } = useUser();
@@ -13,7 +15,7 @@ export default function LandingPage() {
       <nav className="border-b border-slate-800 px-6 py-4 flex justify-between items-center">
         <div className="flex items-center gap-2">
            <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
-             <Activity className="text-white w-5 h-5" />
+             <BubblesIcon className="text-white w-5 h-5" />
            </div>
            <span className="font-bold text-xl tracking-tight text-white">Bubbles</span>
         </div>

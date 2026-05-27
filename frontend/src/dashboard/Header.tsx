@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
-import { Wifi, WifiOff, Server, LogOut, Key, Plus, X, Save, User as UserIcon, Menu } from 'lucide-react';
+import { Wifi, WifiOff, LogOut, Plus, User as UserIcon, Menu } from 'lucide-react';
 import { ConnectionStatus } from '../types';
 import { useClerk, useUser } from '@clerk/nextjs';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { AddServerModal } from './AddServerModal';
 import { CustomDropdown } from './CustomDropdown';
+import BubblesIcon from '../components/BubblesIcon';
 
 export const Header: React.FC = () => {
   const { user } = useUser();
@@ -93,7 +94,7 @@ export const Header: React.FC = () => {
         <div className="flex items-center gap-6">
           <Link href="/dashboard" className="flex items-center gap-2">
             <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
-              <Server className="text-white w-5 h-5" />
+              <BubblesIcon className="text-white w-5 h-5" />
             </div>
             <span className="font-bold text-xl tracking-tight text-white hidden md:inline">Bubbles</span>
           </Link>
