@@ -112,23 +112,18 @@ public:
     virtual ~MarketDataClient() = default;
 
     virtual std::optional<Bubbles::MarketTick> getTicker(TradingSystem::SymbolId symbol) = 0;
-    
     virtual std::pair<std::vector<Bubbles::MarketTick>, std::vector<Bubbles::MarketTick>> 
         getOrderBook(TradingSystem::SymbolId symbol, int depth = 20) = 0;
-
     virtual std::vector<Bubbles::Candle> getCandles(
         TradingSystem::SymbolId symbol,
         int interval,
         TradingSystem::Timestamp startTime,
         TradingSystem::Timestamp endTime) = 0;
-
     virtual int subscribeTicker(const std::vector<TradingSystem::SymbolId>& symbols, 
-                                 Bubbles::MarketDataCallback callback) = 0;
-
+                                  Bubbles::MarketDataCallback callback) = 0;
     virtual int subscribeOrderBook(const std::vector<TradingSystem::SymbolId>& symbols,
                                     int depth,
                                     std::function<void(TradingSystem::SymbolId, const std::vector<Bubbles::MarketTick>&, const std::vector<Bubbles::MarketTick>&)> callback) = 0;
-
     virtual void unsubscribe(int subscriptionId) = 0;
     virtual bool isConnected() const = 0;
 };
@@ -142,12 +137,10 @@ public:
     virtual std::string getExchangeInfo() = 0;
     virtual std::vector<std::string> getTradingPairs() = 0;
     virtual std::string getTrades(TradingSystem::SymbolId symbol, int limit = 100) = 0;
-    
     virtual std::string getAggTrades(TradingSystem::SymbolId symbol, 
                                       TradingSystem::Timestamp startTime,
                                       TradingSystem::Timestamp endTime) = 0;
-    
     virtual std::string get24hrTicker(std::optional<TradingSystem::SymbolId> symbol = std::nullopt) = 0;
 };
 
-} // namespace Bubbles::API
+} 

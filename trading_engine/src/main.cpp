@@ -98,23 +98,31 @@ namespace TradingSystem {
 
         bool validateApiKey(const std::string& apiKey) {
             if (apiKey.empty()) {
+                std::cout << "Empty API key provided" << std::endl;
                 return false;
             }
 
-            std::regex apiKeyPattern("^sk_live_[a-f0-9]{16}$");
+            std::cout << "Validating API Key: '" << apiKey << "'" << std::endl;
+
+            std::regex apiKeyPattern("^sk_live_[a-f0-9]{32}$");
             if (!std::regex_match(apiKey, apiKeyPattern)) {
+                std::cout << "API Key regex mismatch" << std::endl;
                 return false;
             }
 
             std::lock_guard<std::mutex> lock(mutex);
             if (validApiKeys.count(apiKey) > 0) {
+                std::cout << "API Key found in cache" << std::endl;
                 return true;
             }
 
             if (useBackendAuth) {
                 bool isValid = validateWithBackend(apiKey);
                 if (isValid) {
+                    std::cout << "API Key validated with backend" << std::endl;
                     validApiKeys.insert(apiKey);
+                } else {
+                    std::cout << "API Key rejected by backend" << std::endl;
                 }
                 return isValid;
             }
@@ -151,8 +159,9 @@ namespace TradingSystem {
 
             if (n > 0) {
                 std::string response(buffer);
-                return response.find("200 OK") != std::string::npos ||
-                       response.find("\"valid\":true") != std::string::npos;
+                return response.find("200 OK") != std::string::npos &&
+                       (response.find("\"valid\":true") != std::string::npos || 
+                        response.find("\"valid\": true") != std::string::npos);
             }
 
             return false;
@@ -271,13 +280,13 @@ namespace TradingSystem {
             
             if (method == "OPTIONS") {
                 response = buildCorsPreflightResponse();
-            } else if (path == "/health") {
+            } else if (path == "/health" || path.find("/health?") == 0) {
                 response = buildResponse(200, "{\"status\": \"healthy\"}", "application/json");
-            } else if (path == "/status") {
+            } else if (path == "/status" || path.find("/status?") == 0) {
                 response = buildResponse(200, metrics_.getStatusJson(), "application/json");
-            } else if (path == "/metrics") {
+            } else if (path == "/metrics" || path.find("/metrics?") == 0) {
                 response = buildResponse(200, metrics_.getMetricsJson(), "application/json");
-            } else if (path == "/auth") {
+            } else if (path == "/auth" || path.find("/auth?") == 0) {
                 if (method == "POST") {
                     response = handleAuthRequest(request);
                 } else {
@@ -299,7 +308,7 @@ namespace TradingSystem {
             oss << "HTTP/1.1 204 No Content\r\n";
             oss << "Access-Control-Allow-Origin: *\r\n";
             oss << "Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n";
-            oss << "Access-Control-Allow-Headers: Origin, Content-Type, Authorization, Api-Key, Accept, Access-Control-Request-Method, Access-Control-Request-Headers\r\n";
+            oss << "Access-Control-Allow-Headers: Origin, Content-Type, Authorization, Api-Key, Accept, Access-Control-Request-Method, Access-Control-Request-Headers, Cache-Control, Pragma\r\n";
             oss << "Access-Control-Max-Age: 86400\r\n";
             oss << "Access-Control-Allow-Credentials: false\r\n";
             oss << "Connection: close\r\n";
@@ -320,7 +329,7 @@ namespace TradingSystem {
             oss << "Content-Length: " << body.length() << "\r\n";
             oss << "Access-Control-Allow-Origin: *\r\n";
             oss << "Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n";
-            oss << "Access-Control-Allow-Headers: Origin, Content-Type, Authorization, Api-Key, Accept\r\n";
+            oss << "Access-Control-Allow-Headers: Origin, Content-Type, Authorization, Api-Key, Accept, Cache-Control, Pragma\r\n";
             oss << "Access-Control-Allow-Credentials: false\r\n";
             oss << "Connection: close\r\n";
             oss << "\r\n";
@@ -365,18 +374,19 @@ namespace TradingSystem {
 
             int depth = 10;
 
-            std::string orderbookJson = generateOrderBook(symbol, depth);
+            std::string bidsJson, asksJson;
+            generateOrderBook(symbol, depth, bidsJson, asksJson);
             
             std::ostringstream response;
             response << "{\"symbol\": \"" << symbol << "-USD\", \"timestamp\": \"" 
                      << std::chrono::duration_cast<std::chrono::milliseconds>(
                          std::chrono::steady_clock::now().time_since_epoch()).count()
-                     << "\", \"bids\": [" << orderbookJson << "]}";
+                     << "\", \"bids\": [" << bidsJson << "], \"asks\": [" << asksJson << "]}";
             
             return buildResponse(200, response.str(), "application/json");
         }
 
-        std::string generateOrderBook(const std::string& symbol, int depth) {
+        void generateOrderBook(const std::string& symbol, int depth, std::string& bidsJson, std::string& asksJson) {
             double basePrice = 50000.0;
             if (symbol == "eth") basePrice = 3000.0;
             else if (symbol == "ltc") basePrice = 100.0;
@@ -399,10 +409,12 @@ namespace TradingSystem {
                      << ", \"total\": " << (price * size) << "}";
             }
 
-            return bids.str();
+            bidsJson = bids.str();
+            asksJson = asks.str();
         }
 
         std::string extractApiKey(const std::string& request) {
+            // 1. Check Authorization header
             size_t authPos = request.find("Authorization:");
             if (authPos == std::string::npos) {
                 authPos = request.find("authorization:");
@@ -421,21 +433,32 @@ namespace TradingSystem {
                     }
                     return request.substr(start);
                 }
-                
-                start = request.find("Api-Key:", authPos);
-                if (start != std::string::npos) {
-                    start += 8;
-                    size_t end = request.find("\r\n", start);
-                    if (end == std::string::npos) {
-                        end = request.find("\n", start);
-                    }
-                    if (end != std::string::npos) {
-                        return request.substr(start, end - start);
-                    }
-                    return request.substr(start);
-                }
             }
 
+            // 2. Check Api-Key header
+            size_t apiPos = request.find("Api-Key:");
+            if (apiPos == std::string::npos) {
+                apiPos = request.find("api-key:");
+            }
+
+            if (apiPos != std::string::npos) {
+                size_t start = apiPos + 8;
+                // Skip whitespace
+                while (start < request.length() && request[start] == ' ') {
+                    start++;
+                }
+
+                size_t end = request.find("\r\n", start);
+                if (end == std::string::npos) {
+                    end = request.find("\n", start);
+                }
+                if (end != std::string::npos) {
+                    return request.substr(start, end - start);
+                }
+                return request.substr(start);
+            }
+
+            // 3. Check query param
             size_t keyPos = request.find("?api_key=");
             if (keyPos == std::string::npos) {
                 keyPos = request.find("&api_key=");
