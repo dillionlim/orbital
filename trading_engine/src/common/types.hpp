@@ -4,6 +4,8 @@
 #include <vector>
 #include <optional>
 #include <functional>
+#include <memory>
+#include <utility>
 
 namespace TradingSystem {
     using Price = double;

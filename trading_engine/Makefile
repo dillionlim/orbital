@@ -1,7 +1,8 @@
-BUILD_DIR = build
-DOCS_DIR = docs/html
+BUILD_DIR   = build
+CONFIG      = scripts/server.json
+CONFIG_EX   = scripts/server.json.example
 
-.PHONY: all configure build clean run docs docs-serve
+.PHONY: all configure build clean run run-dev help
 
 all: build
 
@@ -14,25 +15,25 @@ build: configure
 clean:
 	rm -rf $(BUILD_DIR)
 
+# `make run` — build (Release) and start the trading server with scripts/server.json.
+# Auto-creates the config from scripts/server.json.example on first run. The build
+# also bundles docs/site/ into the binary; browse http://localhost:9090/docs after start.
 run: build
-	./$(BUILD_DIR)/engine
-
-docs:
-	@if command -v doxygen >/dev/null 2>&1; then \
-		doxygen Doxyfile; \
-		echo "Documentation generated in docs/html/"; \
-		echo "Starting documentation server at http://localhost:8081"; \
-		cd docs/html && python3 -m http.server 8081; \
-	else \
-		echo "doxygen not installed. Please install doxygen:"; \
-		echo "  sudo apt install doxygen graphviz"; \
-		echo "Then run: make docs"; \
+	@if [ ! -f $(CONFIG) ]; then \
+		echo "==> No $(CONFIG) found; copying from $(CONFIG_EX)"; \
+		cp $(CONFIG_EX) $(CONFIG); \
 	fi
+	@echo "==> Starting engine; docs at http://localhost:$$(grep -oE '"port"[^0-9]*[0-9]+' $(CONFIG) | grep -oE '[0-9]+')/docs"
+	./$(BUILD_DIR)/engine --config $(CONFIG)
 
-docs-serve: docs
-	@if command -v python3 >/dev/null 2>&1; then \
-		echo "Starting docs server at http://localhost:8081"; \
-		cd docs/html && python3 -m http.server 8081; \
-	else \
-		echo "Python3 not found. Open docs/html/index.html manually."; \
-	fi
+# `make run-dev` — same as run but disables the in-process market maker.
+run-dev: build
+	@if [ ! -f $(CONFIG) ]; then cp $(CONFIG_EX) $(CONFIG); fi
+	./$(BUILD_DIR)/engine --config $(CONFIG) --no-mm
+
+help:
+	@echo "Targets:"
+	@echo "  make           Build the engine (alias for 'make build')"
+	@echo "  make run       Build + run the engine; docs are at /docs on the engine port"
+	@echo "  make run-dev   Same as run, but with the market maker disabled"
+	@echo "  make clean     Remove the build directory"
