@@ -6,10 +6,7 @@ import {
   Req,
   Delete,
   Param,
-  Body,
-  Headers,
-  HttpException,
-  HttpStatus,
+  Query,
 } from '@nestjs/common';
 import { ApiKeyService } from './api-key.service';
 import { ClerkAuthGuard } from '../auth/clerk-auth.guard';
@@ -51,28 +48,9 @@ export class ApiKeyController {
     return await this.apiKeyService.getApiKeys(userId);
   }
 
-  // POST + body + shared-secret header. Used to be GET ?key=… but:
-  //   1. URLs end up in access logs / browser history; secrets shouldn't.
-  //   2. The endpoint is unauthenticated and hits Prisma findUnique on every
-  //      call — without a gate, anyone can mount a cheap DB-DoS amplifier.
-  // ENGINE_SHARED_SECRET in env is checked when set. Empty / unset = open
-  // (dev-friendly), but a startup warning is logged in main.ts.
-  @Post('validate')
-  async validateApiKey(
-    @Body() body: { key?: string },
-    @Headers('x-engine-secret') engineSecret: string,
-  ) {
-    const expected = process.env.ENGINE_SHARED_SECRET;
-    if (expected && engineSecret !== expected) {
-      throw new HttpException(
-        'engine secret missing or invalid',
-        HttpStatus.UNAUTHORIZED,
-      );
-    }
-    if (!body?.key || typeof body.key !== 'string') {
-      throw new HttpException('missing key', HttpStatus.BAD_REQUEST);
-    }
-    return await this.apiKeyService.validateApiKey(body.key);
+  @Get('validate')
+  async validateApiKey(@Query('key') key: string) {
+    return await this.apiKeyService.validateApiKey(key);
   }
 
   @Delete(':id')
