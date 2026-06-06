@@ -1,8 +1,12 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { Card } from '../ui/Card';
-import { generateOrderBook } from '../services/mockData';
 import { Order } from '../types';
 import { useApiKey } from '../hooks/useApiKey';
+import { useEngineStream } from '../hooks/useEngineStream';
+import { useCurrentServer } from '../hooks/useCurrentServer';
+import type { EngineBookMessage, EngineBookDeltaMessage } from '../services/engineStream';
+
+const REST_FALLBACK_POLL_MS = 1000;
 
 interface OrderBookData {
   bids: Order[];
@@ -19,22 +23,108 @@ export const OrderBook: React.FC = () => {
   const [lastUpdate, setLastUpdate] = useState<string>('');
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  
-  const { apiKey, isLoading: isApiKeyLoading, createApiKey, hasApiKey, refreshApiKey, clearApiKey } = useApiKey();
+
+  const { apiKey, isLoading: isApiKeyLoading, refreshApiKey, clearApiKey } = useApiKey();
+  const { stream, status: wsStatus } = useEngineStream();
+  const server = useCurrentServer();
+
+  // Wipe accumulated state whenever the user switches trading servers — the
+  // old server's bids/asks must NOT leak into a view that's now pointed
+  // somewhere else. The WS subscribe effect below also runs on (server,
+  // symbol), but it only re-keys after stream reconnects; this clears the
+  // visible state immediately.
+  useEffect(() => {
+    setBids([]);
+    setAsks([]);
+    setLastUpdate('');
+    setError(null);
+    setIsLoading(true);
+  }, [server]);
+
+  // ---- WebSocket subscription (preferred path) -----------------------------
+  //
+  // We maintain price → qty maps locally and apply deltas as they arrive. seq
+  // is monotonic per symbol; on a gap we ask the server for a fresh snapshot
+  // (re-subscribe). Maps live in refs because we need the previous state when
+  // applying a delta — using setBids/setAsks directly would race with React
+  // batching under high-frequency updates.
+
+  const bidsMapRef = useRef<Map<number, number>>(new Map());
+  const asksMapRef = useRef<Map<number, number>>(new Map());
+  const seqRef = useRef<number>(0);
+
+  useEffect(() => {
+    if (!stream) return;
+
+    // Reset state when (re)subscribing to a different symbol.
+    bidsMapRef.current = new Map();
+    asksMapRef.current = new Map();
+    seqRef.current = 0;
+
+    const renderFromMaps = () => {
+      // bids descending (highest price first), asks ascending.
+      const toOrders = (m: Map<number, number>, desc: boolean): Order[] => {
+        const arr = Array.from(m.entries(), ([price, size]) => ({
+          price, size, total: price * size,
+        }));
+        arr.sort((a, b) => desc ? b.price - a.price : a.price - b.price);
+        return arr;
+      };
+      setBids(toOrders(bidsMapRef.current, true));
+      setAsks(toOrders(asksMapRef.current, false));
+    };
+
+    const applyChanges = (m: Map<number, number>, changes: Array<[number, number]>) => {
+      for (const [price, qty] of changes) {
+        if (qty === 0) m.delete(price);
+        else m.set(price, qty);
+      }
+    };
+
+    const off = stream.subscribe<EngineBookMessage | EngineBookDeltaMessage>(
+      'book',
+      symbol,
+      (msg) => {
+        if (msg.t === 'book') {
+          // Snapshot — replace entire state.
+          bidsMapRef.current = new Map(msg.bids);
+          asksMapRef.current = new Map(msg.asks);
+          seqRef.current = msg.seq;
+        } else {
+          // Delta. seq must be exactly seq+1 — anything else is a gap and
+          // means we missed a publish; recover by asking for a snapshot.
+          const expected = seqRef.current + 1;
+          if (msg.seq !== expected) {
+            // The very first message after subscribe should be `book`, so a
+            // delta arriving with seqRef=0 is the same gap case (expected=1
+            // but the seq is whatever the engine is at currently).
+            stream.resync('book', symbol);
+            return;  // wait for the snapshot reply; don't apply this delta
+          }
+          applyChanges(bidsMapRef.current, msg.bids);
+          applyChanges(asksMapRef.current, msg.asks);
+          seqRef.current = msg.seq;
+        }
+        renderFromMaps();
+        setLastUpdate(String(msg.ts));
+        setError(null);
+        setIsLoading(false);
+      },
+    );
+    return off;
+  }, [stream, symbol]);
+
+  // ---- REST fallback (used only when WS is not open) -----------------------
 
   const fetchOrderBook = useCallback(async () => {
-    const currentServer = localStorage.getItem('currentServer') || 'localhost:9090';
-    const [host, port] = currentServer.split(':');
+    const [host, port] = server.split(':');
     const symbolParam = symbol.split('-')[0].toLowerCase();
 
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 5000);
+      const timeoutId = setTimeout(() => controller.abort(), 4000);
 
-      const headers: HeadersInit = {
-        'Content-Type': 'application/json',
-      };
-
+      const headers: HeadersInit = { 'Content-Type': 'application/json' };
       if (apiKey) {
         headers['Authorization'] = `Bearer ${apiKey}`;
         headers['Api-Key'] = apiKey;
@@ -43,92 +133,93 @@ export const OrderBook: React.FC = () => {
       const response = await fetch(`http://${host}:${port}/orderbook?symbol=${symbolParam}`, {
         method: 'GET',
         headers,
-        signal: controller.signal
+        signal: controller.signal,
       });
 
       clearTimeout(timeoutId);
 
       if (response.status === 401) {
-        console.log('API Key unauthorized, refreshing...');
         clearApiKey();
         refreshApiKey();
+        setError('Re-authenticating…');
         return;
       }
 
-      if (response.ok) {
-        const data: OrderBookData = await response.json();
-        setBids(data.bids || []);
-        setAsks(data.asks || []);
-        setLastUpdate(data.timestamp || new Date().toISOString());
-        setError(null);
-      } else {
-        throw new Error('Failed to fetch order book');
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
       }
-    } catch {
-      const mockData = generateOrderBook();
-      setBids(mockData.bids);
-      setAsks(mockData.asks);
-      setLastUpdate(new Date().toISOString());
+      const data: OrderBookData = await response.json();
+      setBids(data.bids || []);
+      setAsks(data.asks || []);
+      setLastUpdate(data.timestamp || new Date().toISOString());
       setError(null);
+    } catch (e: unknown) {
+      // Surface the failure honestly — never fall back to fake data.
+      setBids([]);
+      setAsks([]);
+      const msg = e instanceof Error ? e.message : 'fetch failed';
+      setError(`${msg} — engine at ${server}`);
     } finally {
       setIsLoading(false);
     }
-  }, [symbol, apiKey]);
+  }, [symbol, server, apiKey, clearApiKey, refreshApiKey]);
 
   useEffect(() => {
-    if (!isApiKeyLoading) {
-      setIsLoading(true);
-      fetchOrderBook();
-    }
-  }, [fetchOrderBook, isApiKeyLoading]);
-
-  useEffect(() => {
-    if (!isApiKeyLoading && !hasApiKey) {
-      createApiKey();
-    }
-  }, [isApiKeyLoading, hasApiKey, createApiKey]);
-
-  useEffect(() => {
-    const interval = setInterval(fetchOrderBook, 1000);
-    return () => {
-      clearInterval(interval);
-    };
-  }, [fetchOrderBook]);
+    if (isApiKeyLoading) return;
+    if (wsStatus === 'open') return;  // WS is feeding state; REST not needed
+    setIsLoading(true);
+    fetchOrderBook();
+    const interval = setInterval(fetchOrderBook, REST_FALLBACK_POLL_MS);
+    return () => clearInterval(interval);
+  }, [fetchOrderBook, isApiKeyLoading, wsStatus]);
 
   const maxTotal = Math.max(
     bids.reduce((acc, curr) => acc + curr.size * curr.price, 0),
     asks.reduce((acc, curr) => acc + curr.size * curr.price, 0)
   );
 
-  const filteredBids = bids.filter(bid => 
+  const filteredBids = bids.filter(bid =>
     !filter || (bid.price.toString().includes(filter) || bid.size.toString().includes(filter))
   );
 
-  const filteredAsks = asks.filter(ask => 
+  const filteredAsks = asks.filter(ask =>
     !filter || (ask.price.toString().includes(filter) || ask.size.toString().includes(filter))
   );
 
+  const transportLabel = wsStatus === 'open' ? 'live' : wsStatus === 'connecting' ? 'connecting' : 'polling';
+  const transportClass =
+    wsStatus === 'open'
+      ? 'bg-emerald-900/40 text-emerald-300 border border-emerald-800/60'
+      : wsStatus === 'connecting'
+        ? 'bg-amber-900/40 text-amber-300 border border-amber-800/60'
+        : 'bg-slate-800 text-slate-400 border border-slate-700';
+
   return (
-    <Card 
-      title="Order Book" 
+    <Card
+      title="Order Book"
       action={
-        <select 
-          title="Select Market" 
-          className="bg-slate-700 text-xs text-white border-none rounded px-2 py-1 outline-none"
-          value={symbol}
-          onChange={(e) => setSymbol(e.target.value)}
-        >
-          <option>BTC-USD</option>
-          <option>ETH-USD</option>
-          <option>LTC-USD</option>
-        </select>
+        <div className="flex items-center gap-2">
+          <span className={`text-[10px] px-2 py-0.5 rounded font-mono uppercase tracking-wide ${transportClass}`}>
+            {transportLabel}
+          </span>
+          <select
+            title="Select Market"
+            className="bg-slate-700 text-xs text-white border-none rounded px-2 py-1 outline-none"
+            value={symbol}
+            onChange={(e) => setSymbol(e.target.value)}
+          >
+            <option>BTC-USD</option>
+            <option>ETH-USD</option>
+            <option>LTC-USD</option>
+          </select>
+        </div>
       }
     >
       <div className="flex flex-col h-full">
         {isApiKeyLoading ? (
           <div className="text-xs text-slate-500 mb-2 px-2">Initializing authentication...</div>
         ) : error ? (
-          <div className="text-xs text-yellow-500 mb-2 px-2">
+          <div className="text-xs text-red-400 mb-2 px-2 font-mono">
             {error}
           </div>
         ) : null}
@@ -138,15 +229,15 @@ export const OrderBook: React.FC = () => {
           </div>
         )}
         <div className="mb-3">
-          <input 
-            type="text" 
-            placeholder="Filter orders..." 
+          <input
+            type="text"
+            placeholder="Filter orders..."
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
             className="w-full bg-slate-900 border border-slate-700 rounded px-3 py-1.5 text-xs text-white focus:border-blue-500 outline-none"
           />
         </div>
-        
+
         {/* Headers */}
         <div className="flex border-b border-slate-800 text-[10px] uppercase text-slate-400 font-semibold mb-1">
           <div className="w-1/2 grid grid-cols-[0.8fr_1fr_1fr] gap-1 px-2 py-1 border-r border-slate-800">
