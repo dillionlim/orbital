@@ -1,20 +1,120 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Card } from '../ui/Card';
-import { Play, Pause, Trash2, Info } from 'lucide-react';
-import { initialBots } from '../services/mockData';
-import { BotStrategy } from '../types';
+import { Info, Activity, Pause, Play } from 'lucide-react';
+import { useCurrentServer } from '../hooks/useCurrentServer';
+import { useApiKey } from '../hooks/useApiKey';
+import { useEngineUserId } from '../hooks/useEngineUserId';
+import { pauseBot, resumeBot } from '../services/botControl';
+
+interface EngineBot {
+  user_id: string;
+  client_id: string;
+  name: string;
+  strategy_name: string;
+  is_internal: boolean;
+  status: 'active' | 'idle' | 'paused' | 'error';
+  paused: boolean;
+  orders_placed: number;
+  fills: number;
+  volume: number;
+  total_pnl: number;
+  hourly_pnl: number;
+  first_seen: number;
+  last_activity: number;
+}
+
+const POLL_MS = 1500;
+
+const fmtMoney = (v: number): string => {
+  if (Math.abs(v) >= 1000) return v.toLocaleString(undefined, { maximumFractionDigits: 0 });
+  return v.toFixed(2);
+};
 
 export const SimulatedBots: React.FC = () => {
-  const [bots, setBots] = useState<BotStrategy[]>(initialBots);
+  const [bots, setBots] = useState<EngineBot[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const server = useCurrentServer();
+  const { apiKey } = useApiKey();
+  const engineUserId = useEngineUserId();
 
-  const toggleBot = (id: string) => {
-    setBots(bots.map(bot => 
-      bot.id === id ? { ...bot, status: bot.status === 'active' ? 'paused' : 'active' } : bot
-    ));
+  // Wipe bot rows when server changes — different engine, different bots.
+  useEffect(() => {
+    setBots([]); setError(null); setActionError(null);
+  }, [server]);
+
+  useEffect(() => {
+    let alive = true;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    const tick = async () => {
+      try {
+        const ctrl = new AbortController();
+        const t = setTimeout(() => ctrl.abort(), 4000);
+        const res = await fetch(`http://${server}/bots`, { signal: ctrl.signal });
+        clearTimeout(t);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json() as { bots: EngineBot[] };
+        if (!alive) return;
+        setBots(data.bots || []);
+        setError(null);
+      } catch (e: unknown) {
+        if (!alive) return;
+        setError(e instanceof Error ? e.message : 'fetch failed');
+      } finally {
+        if (alive) timer = setTimeout(tick, POLL_MS);
+      }
+    };
+
+    tick();
+    return () => {
+      alive = false;
+      if (timer) clearTimeout(timer);
+    };
+  }, [server]);
+
+  const onToggle = async (bot: EngineBot) => {
+    if (!apiKey) { setActionError('Missing API key'); return; }
+    const id = bot.client_id || bot.user_id;
+    setBusyId(id);
+    setActionError(null);
+    const fn = bot.paused ? resumeBot : pauseBot;
+    const res = await fn(server, id, apiKey);
+    if (!res.ok) {
+      const map: Record<string, string> = {
+        unauthorized: 'Invalid API key',
+        not_owner: 'You can only pause your own bots',
+        not_found: 'Bot not found on engine',
+        internal_bot: 'Internal market maker can\'t be paused',
+        network: 'Network error',
+      };
+      setActionError(map[res.error || 'network'] || 'Failed');
+    } else {
+      // Optimistic flip until next poll picks it up.
+      setBots(prev => prev.map(b =>
+        (b.client_id || b.user_id) === id
+          ? { ...b, paused: !bot.paused, status: !bot.paused ? 'paused' : 'active' }
+          : b,
+      ));
+    }
+    setBusyId(null);
   };
 
-  const deleteBot = (id: string) => {
-    setBots(bots.filter(b => b.id !== id));
+  const dotColor = (b: EngineBot) => {
+    if (b.paused || b.status === 'paused') return 'bg-yellow-500';
+    if (b.status === 'error') return 'bg-red-500';
+    if (b.status === 'idle') return 'bg-slate-500';
+    return b.is_internal ? 'bg-blue-400 animate-pulse' : 'bg-green-500 animate-pulse';
+  };
+
+  const statusBadge = (b: EngineBot) => {
+    if (b.paused || b.status === 'paused') {
+      return 'bg-yellow-900/40 text-yellow-300 border border-yellow-800/60';
+    }
+    if (b.status === 'error') return 'bg-red-900/40 text-red-300 border border-red-800/60';
+    if (b.status === 'idle') return 'bg-slate-800 text-slate-400 border border-slate-700';
+    return 'bg-green-900/40 text-green-300 border border-green-800/60';
   };
 
   return (
@@ -24,63 +124,96 @@ export const SimulatedBots: React.FC = () => {
           <table className="w-full text-left border-collapse">
             <thead className="text-[10px] uppercase text-slate-400 bg-slate-900/50 sticky top-0">
               <tr>
-                <th className="px-3 py-2 font-medium whitespace-nowrap">Bot ID</th>
+                <th className="px-3 py-2 font-medium whitespace-nowrap">Bot</th>
                 <th className="px-3 py-2 font-medium whitespace-nowrap">Strategy</th>
+                <th className="px-3 py-2 font-medium text-right whitespace-nowrap">Fills</th>
                 <th className="px-3 py-2 font-medium text-right whitespace-nowrap">Total PnL</th>
-                <th className="px-3 py-2 font-medium text-right whitespace-nowrap">Hr PnL</th>
+                <th className="px-3 py-2 font-medium text-right whitespace-nowrap">1h PnL</th>
                 <th className="px-3 py-2 font-medium text-center whitespace-nowrap">Status</th>
+                <th className="px-3 py-2 font-medium text-center whitespace-nowrap w-12">Ctl</th>
               </tr>
             </thead>
             <tbody className="text-sm divide-y divide-slate-800">
-              {bots.map((bot) => (
-                <tr key={bot.id} className="group hover:bg-slate-700/30 transition-colors">
-                  <td className="px-3 py-2.5 whitespace-nowrap">
-                    <div className="flex items-center gap-2">
-                      <div className={`w-2 h-2 rounded-full ${bot.status === 'active' ? 'bg-green-500 animate-pulse' : 'bg-yellow-500'}`} />
-                      <span className="font-medium text-white">{bot.name}</span>
-                    </div>
-                  </td>
-                  <td className="px-3 py-2 text-slate-400 text-xs">{bot.strategyName}</td>
-                  <td className={`px-3 py-2 text-right font-mono ${bot.totalPnL >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                    {bot.totalPnL > 0 ? '+' : ''}{bot.totalPnL}
-                  </td>
-                  <td className={`px-3 py-2 text-right font-mono text-xs ${bot.hourlyPnL >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                    {bot.hourlyPnL > 0 ? '+' : ''}{bot.hourlyPnL}
-                  </td>
-                  <td className="px-3 py-2">
-                    <div className="flex items-center justify-center gap-1">
-                      <button 
-                        onClick={() => toggleBot(bot.id)}
-                        className={`p-1.5 rounded transition-colors ${bot.status === 'active' ? 'bg-green-900/30 text-green-400 hover:bg-green-900/50' : 'bg-yellow-900/30 text-yellow-400 hover:bg-yellow-900/50'}`}
-                        title={bot.status === 'active' ? 'Pause' : 'Resume'}
-                      >
-                        {bot.status === 'active' ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
-                      </button>
-                      <button 
-                        onClick={() => deleteBot(bot.id)}
-                        className="p-1.5 hover:bg-red-900/50 rounded text-slate-500 hover:text-red-400 transition-colors"
-                        title="Remove Bot"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
+              {bots.map((bot) => {
+                const id = bot.client_id || bot.user_id;
+                const isOwn = !!engineUserId && bot.user_id === engineUserId && !bot.is_internal;
+                const busy = busyId === id;
+                return (
+                  <tr key={`${bot.user_id}::${id}`} className="group hover:bg-slate-700/30 transition-colors">
+                    <td className="px-3 py-2.5 whitespace-nowrap">
+                      <div className="flex items-center gap-2">
+                        <div className={`w-2 h-2 rounded-full ${dotColor(bot)}`} />
+                        <span className="font-medium text-white">{bot.name}</span>
+                        {bot.is_internal && (
+                          <span className="text-[9px] uppercase font-mono px-1.5 py-0.5 rounded bg-blue-900/50 text-blue-300 border border-blue-800/60">
+                            internal
+                          </span>
+                        )}
+                        {isOwn && (
+                          <span className="text-[9px] uppercase font-mono px-1.5 py-0.5 rounded bg-purple-900/40 text-purple-300 border border-purple-800/60">
+                            you
+                          </span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="px-3 py-2 text-slate-400 text-xs">{bot.strategy_name}</td>
+                    <td className="px-3 py-2 text-right text-slate-300 font-mono text-xs">
+                      {bot.fills.toLocaleString()}
+                    </td>
+                    <td className={`px-3 py-2 text-right font-mono ${bot.total_pnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                      {bot.total_pnl > 0 ? '+' : ''}{fmtMoney(bot.total_pnl)}
+                    </td>
+                    <td className={`px-3 py-2 text-right font-mono text-xs ${bot.hourly_pnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                      {bot.hourly_pnl > 0 ? '+' : ''}{fmtMoney(bot.hourly_pnl)}
+                    </td>
+                    <td className="px-3 py-2 text-center">
+                      <span className={`text-[10px] uppercase font-mono px-2 py-0.5 rounded ${statusBadge(bot)}`}>
+                        {bot.status}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2 text-center">
+                      {isOwn ? (
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={() => onToggle(bot)}
+                          title={bot.paused ? 'Resume bot' : 'Pause bot'}
+                          className={`inline-flex items-center justify-center w-7 h-7 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                            bot.paused
+                              ? 'bg-green-900/40 text-green-300 hover:bg-green-800/60'
+                              : 'bg-yellow-900/40 text-yellow-300 hover:bg-yellow-800/60'
+                          }`}
+                        >
+                          {bot.paused
+                            ? <Play className="w-3.5 h-3.5" />
+                            : <Pause className="w-3.5 h-3.5" />}
+                        </button>
+                      ) : (
+                        <span className="text-slate-700">—</span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
               {bots.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="text-center py-8 text-slate-500 text-sm">
-                    No active bots connected.
+                  <td colSpan={7} className="text-center py-8 text-slate-500 text-sm">
+                    {error
+                      ? `No engine at ${server}`
+                      : 'No active bots yet — waiting for activity…'}
                   </td>
                 </tr>
               )}
             </tbody>
           </table>
         </div>
-        
+
         <div className="mt-2 py-2 border-t border-slate-700 flex justify-center items-center gap-2 text-xs text-slate-500">
+          <Activity className="w-3.5 h-3.5" />
+          {actionError
+            ? <span className="text-red-400">{actionError}</span>
+            : <>Server-managed. You can pause/resume bots tagged <span className="text-purple-300 font-mono">you</span>.</>}
           <Info className="w-3.5 h-3.5" />
-          Connect external engines via API to add new strategies.
         </div>
       </div>
     </Card>

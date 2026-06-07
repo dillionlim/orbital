@@ -1,23 +1,49 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Wifi, WifiOff, LogOut, Plus, User as UserIcon, Menu } from 'lucide-react';
 import { ConnectionStatus } from '../types';
 import { useClerk, useUser } from '@clerk/nextjs';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { AddServerModal } from './AddServerModal';
+import { ApiKeyBadge } from './ApiKeyBadge';
 import { CustomDropdown } from './CustomDropdown';
+import { setCurrentServer as broadcastCurrentServer } from '../hooks/useCurrentServer';
 import BubblesIcon from '../components/BubblesIcon';
+
+const DEFAULT_SERVER = 'localhost:9090';
+const KEY_CURRENT = 'currentServer';
+const KEY_SERVERS = 'orbital_servers';
 
 export const Header: React.FC = () => {
   const { user } = useUser();
   const { signOut } = useClerk();
   const pathname = usePathname();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  
-  // Server Management State
-  const [servers, setServers] = useState<string[]>(['localhost:9090']);
-  const [currentServer, setCurrentServer] = useState(servers[0]);
-  const [status, setStatus] = useState<ConnectionStatus>(ConnectionStatus.CONNECTED);
+
+  // Server Management State — hydrated from localStorage on mount so the dropdown
+  // reflects what the widgets are actually pointed at, not just a hardcoded default.
+  const [servers, setServers] = useState<string[]>([DEFAULT_SERVER]);
+  const [currentServer, setCurrentServer] = useState(DEFAULT_SERVER);
+  const [status, setStatus] = useState<ConnectionStatus>(ConnectionStatus.CONNECTING);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    let storedServers: string[] = [DEFAULT_SERVER];
+    try {
+      const raw = localStorage.getItem(KEY_SERVERS);
+      if (raw) storedServers = JSON.parse(raw);
+    } catch {
+      /* ignore malformed storage */
+    }
+    const storedCurrent = localStorage.getItem(KEY_CURRENT) || DEFAULT_SERVER;
+    // Always include the default + the current selection in the list so the
+    // user can switch back even if their saved selection is unreachable.
+    const merged = Array.from(new Set([DEFAULT_SERVER, ...storedServers, storedCurrent]));
+    setServers(merged);
+    setCurrentServer(storedCurrent);
+    localStorage.setItem(KEY_SERVERS, JSON.stringify(merged));
+    broadcastCurrentServer(storedCurrent);
+  }, []);
   
   // Add Server Modal State
   const [isAddServerModalOpen, setIsAddServerModalOpen] = useState(false);
@@ -56,32 +82,51 @@ export const Header: React.FC = () => {
   };
 
   const handleServerChange = async (server: string) => {
+    // Broadcast first so dashboard widgets bind to the new server immediately.
+    setCurrentServer(server);
+    broadcastCurrentServer(server);
     setStatus(ConnectionStatus.CONNECTING);
-    
+
     const isHealthy = await checkServerHealth(server);
-    
-    if (isHealthy) {
-      setCurrentServer(server);
-      localStorage.setItem('currentServer', server);
-      setStatus(ConnectionStatus.CONNECTED);
-    } else {
-      setStatus(ConnectionStatus.DISCONNECTED);
-      alert(`Server ${server} is not responding. Connection aborted.`);
-      // Revert status to connected for the current server after a short delay or immediately?
-      // Since we didn't switch currentServer, we are technically still connected to the old one (if it was up).
-      // But showing DISCONNECTED briefly is good feedback.
-      setTimeout(() => setStatus(ConnectionStatus.CONNECTED), 2000);
-    }
+    setStatus(isHealthy ? ConnectionStatus.CONNECTED : ConnectionStatus.DISCONNECTED);
   };
 
   const handleSaveServer = (newServerIp: string) => {
-    setServers([...servers, newServerIp]);
+    const next = Array.from(new Set([...servers, newServerIp]));
+    setServers(next);
     setCurrentServer(newServerIp);
-    localStorage.setItem('currentServer', newServerIp);
+    localStorage.setItem(KEY_SERVERS, JSON.stringify(next));
+    broadcastCurrentServer(newServerIp);
     setIsAddServerModalOpen(false);
     setStatus(ConnectionStatus.CONNECTING);
     setTimeout(() => setStatus(ConnectionStatus.CONNECTED), 1000);
   };
+
+  const handleRemoveServer = (server: string) => {
+    if (server === DEFAULT_SERVER) return;
+    const next = servers.filter(s => s !== server);
+    setServers(next);
+    localStorage.setItem(KEY_SERVERS, JSON.stringify(next));
+    if (currentServer === server) {
+      setCurrentServer(DEFAULT_SERVER);
+      broadcastCurrentServer(DEFAULT_SERVER);
+      setStatus(ConnectionStatus.CONNECTING);
+    }
+  };
+
+  // Re-check the current server on mount + every 8s so the wifi indicator stays honest.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    let alive = true;
+    const tick = async () => {
+      const ok = await checkServerHealth(currentServer);
+      if (!alive) return;
+      setStatus(ok ? ConnectionStatus.CONNECTED : ConnectionStatus.DISCONNECTED);
+    };
+    tick();
+    const id = setInterval(tick, 8000);
+    return () => { alive = false; clearInterval(id); };
+  }, [currentServer]);
 
   const navLinks = [
     { href: '/dashboard', label: 'Dashboard' },
@@ -96,7 +141,7 @@ export const Header: React.FC = () => {
             <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
               <BubblesIcon className="text-white w-5 h-5" />
             </div>
-            <span className="font-bold text-xl tracking-tight text-white hidden md:inline">Bubbles</span>
+            <span className="font-bold text-xl tracking-tight text-white hidden md:inline">Bubbles<span className="text-blue-500">Pro</span></span>
           </Link>
 
           {/* Desktop Navigation */}
@@ -117,13 +162,16 @@ export const Header: React.FC = () => {
              <span className="text-slate-400 text-xs font-mono hidden sm:inline">SERVER:</span>
              
              <div className="flex items-center bg-slate-800 rounded-md border border-slate-700 px-3 py-1.5 w-64 md:w-80">
-                <CustomDropdown 
+                <CustomDropdown
                   options={servers}
                   selected={currentServer}
                   onChange={handleServerChange}
+                  onRemove={handleRemoveServer}
+                  protectedOption={DEFAULT_SERVER}
                 />
                 
-                <button 
+                <button
+                  type="button"
                   onClick={() => setIsAddServerModalOpen(true)}
                   className="ml-2 hover:bg-slate-700 p-1 rounded text-slate-400 hover:text-white transition-colors border-l border-slate-700 pl-2"
                   title="Add new server"
@@ -131,8 +179,9 @@ export const Header: React.FC = () => {
                   <Plus className="w-4 h-4" />
                 </button>
 
-                <button 
-                  onClick={toggleConnection} 
+                <button
+                  type="button"
+                  onClick={toggleConnection}
                   className="ml-2 hover:bg-slate-700 p-1 rounded transition-colors"
                   title={status === ConnectionStatus.CONNECTED ? "Disconnect" : "Connect"}
                 >
@@ -149,17 +198,22 @@ export const Header: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-4">
+          <div className="hidden md:block">
+            <ApiKeyBadge />
+          </div>
+
           <div className="hidden lg:flex flex-col items-end">
             <span className="text-sm font-medium text-white">Welcome, {user?.username || user?.fullName || user?.firstName}</span>
           </div>
-          
+
           <div className="h-8 w-[1px] bg-slate-700 mx-2 hidden lg:block"></div>
 
           <Link href="/profile" className="p-2 hover:bg-slate-800 rounded-full text-slate-400 hover:text-white transition-colors" title="Profile">
             <UserIcon className="w-5 h-5" />
           </Link>
 
-          <button 
+          <button
+            type="button"
             onClick={() => signOut()}
             className="flex items-center gap-2 text-slate-400 hover:text-red-400 transition-colors text-sm font-medium"
           >
@@ -169,7 +223,7 @@ export const Header: React.FC = () => {
 
           {/* Mobile Menu */}
           <div className="md:hidden">
-            <button onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)} className="p-2 hover:bg-slate-800 rounded-full text-slate-400 hover:text-white transition-colors" title="Menu">
+            <button type="button" onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)} className="p-2 hover:bg-slate-800 rounded-full text-slate-400 hover:text-white transition-colors" title="Menu">
               <Menu className="w-5 h-5" />
             </button>
           </div>
