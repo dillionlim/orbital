@@ -34,7 +34,12 @@ public:
 
 private:
     void worker_loop();
-    void publish_snapshot();
+    // Publishes a `snapshot=true` BookDelta with the current top-20 (used at
+    // shard startup so SnapshotStore has a baseline).
+    void publish_initial_snapshot();
+    // Diffs current top-20 vs prev_bids_/prev_asks_ and publishes an
+    // incremental BookDelta if anything in top-20 changed.
+    void publish_book_change();
 
     SymbolId symbol_;
     OrderBook book_;
@@ -43,6 +48,14 @@ private:
     std::atomic<uint64_t>& trade_id_counter_;
     std::atomic<bool> running_{false};
     std::thread thread_;
+
+    // Per-symbol sequence + last-published top-20 for delta computation. Only
+    // touched by publish_initial_snapshot() / publish_book_change(), which are
+    // both called from the worker thread (publish_initial_snapshot runs
+    // before the thread starts, on the same thread that calls start()).
+    uint64_t seq_ = 0;
+    std::vector<BookLevel> prev_bids_;
+    std::vector<BookLevel> prev_asks_;
 };
 
 }

@@ -45,6 +45,17 @@ void Dispatcher::on_message(SessionPtr s, std::string_view payload) {
             if (!m.hello.client_id.empty()) {
                 s->client_id = m.hello.client_id;
                 if (bots_) bots_->note_client_id(s->user_id, m.hello.client_id);
+                // Paused-bot enforcement: the moment we know the client_id we
+                // can decide whether this session is allowed. Pause state is
+                // user-controlled via the dashboard's pause/resume buttons.
+                // Setting alive=false trips the WS read loop's exit check;
+                // the connection closes and the bot's reconnect attempt will
+                // hit the same check again until it's resumed.
+                if (bots_ && bots_->is_paused(m.hello.client_id)) {
+                    send_text(s, encode_error("BOT_PAUSED",
+                        "Bot is paused. Resume from the dashboard."));
+                    s->alive = false;
+                }
             }
             return;
         case ParsedMessage::Type::Ping:
@@ -78,10 +89,38 @@ void Dispatcher::on_disconnect(SessionPtr s) {
     }
 }
 
+void Dispatcher::cancel_orders_for_client(std::string_view client_id) {
+    if (client_id.empty()) return;
+    std::vector<OrderId> ids;
+    sessions_.for_each([&](const SessionPtr& s) {
+        if (s->is_internal) return;
+        if (s->client_id != client_id) return;
+        std::lock_guard<std::mutex> lk(s->orders_mu);
+        for (OrderId oid : s->own_orders) ids.push_back(oid);
+    });
+    for (OrderId oid : ids) {
+        CancelOrderCmd cmd;
+        cmd.order_id = oid;
+        cmd.user_id = "";  // engine-initiated; not attributed to a user
+        cmd.session_id = kInternalSession;
+        cmd.ts = now_ms();
+        seq_.submit_cancel(std::move(cmd));
+    }
+}
+
 void Dispatcher::handle_place(SessionPtr s, const InboundPlaceOrder& p) {
     auto sym = registry_->id_for(p.symbol);
     if (!sym) {
         send_text(s, encode_error("UNKNOWN_SYMBOL", p.symbol));
+        metrics_.ordersRejected++;
+        return;
+    }
+
+    // Defensive pause check — if the bot got paused after hello (mid-session),
+    // refuse new orders even though the WS may still be open. The hello-time
+    // check already handles new connections.
+    if (bots_ && !s->client_id.empty() && bots_->is_paused(s->client_id)) {
+        send_text(s, encode_error("BOT_PAUSED", "Bot is paused"));
         metrics_.ordersRejected++;
         return;
     }
@@ -195,11 +234,17 @@ void Dispatcher::on_outbound(const OutboundEvent& ev) {
                 }
                 if (send) send_text(s, encoded);
             });
-        } else if constexpr (std::is_same_v<T, BookSnapshotEvent>) {
-            // Cache for REST + push to subscribed sessions.
-            auto sp = std::make_shared<const BookSnapshotEvent>(e);
-            snapshots_->publish(sp);
-            auto encoded = encode_book_snapshot(e, *registry_);
+        } else if constexpr (std::is_same_v<T, BookDelta>) {
+            // SnapshotStore is a separate EventBus subscriber; it has already
+            // updated its cached state by the time we get here (subscribers
+            // run synchronously in registration order, but each subscriber
+            // sees every event — we don't depend on ordering between them).
+            //
+            // For the wire: snapshot=true gets sent as `book` (full state),
+            // snapshot=false as `book_delta` (incremental).
+            const std::string encoded = e.snapshot
+                ? encode_book_snapshot_from_delta(e, *registry_)
+                : encode_book_delta(e, *registry_);
             sessions_.for_each([&](const SessionPtr& s) {
                 if (s->is_internal) return;
                 bool send;

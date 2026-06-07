@@ -217,6 +217,18 @@ std::string encode_trade(const TradePrint& tp, const SymbolRegistry& reg) {
     return finish(buf);
 }
 
+namespace {
+
+void write_levels(rapidjson::Writer<StringBuffer>& w, const std::vector<BookLevel>& levels) {
+    w.StartArray();
+    for (const auto& l : levels) {
+        w.StartArray(); w.Double(l.price); w.Uint64(l.qty); w.EndArray();
+    }
+    w.EndArray();
+}
+
+}  // namespace
+
 std::string encode_book_snapshot(const BookSnapshotEvent& s, const SymbolRegistry& reg) {
     StringBuffer buf;
     Writer<StringBuffer> w(buf);
@@ -225,17 +237,44 @@ std::string encode_book_snapshot(const BookSnapshotEvent& s, const SymbolRegistr
     auto sym = reg.name_for(s.symbol);
     if (sym) { w.Key("symbol"); w.String(sym->c_str()); }
     w.Key("snapshot"); w.Bool(true);
+    w.Key("seq"); w.Uint64(s.seq);
     w.Key("ts"); w.Uint64(s.ts);
-    w.Key("bids"); w.StartArray();
-    for (const auto& l : s.bids) {
-        w.StartArray(); w.Double(l.price); w.Uint64(l.qty); w.EndArray();
-    }
-    w.EndArray();
-    w.Key("asks"); w.StartArray();
-    for (const auto& l : s.asks) {
-        w.StartArray(); w.Double(l.price); w.Uint64(l.qty); w.EndArray();
-    }
-    w.EndArray();
+    w.Key("bids"); write_levels(w, s.bids);
+    w.Key("asks"); write_levels(w, s.asks);
+    w.EndObject();
+    return finish(buf);
+}
+
+std::string encode_book_snapshot_from_delta(const BookDelta& d, const SymbolRegistry& reg) {
+    // Same wire shape as encode_book_snapshot, but sourced directly from the
+    // initial-snapshot delta the matching engine emitted (no round-trip
+    // through SnapshotStore needed when broadcasting to existing subs).
+    StringBuffer buf;
+    Writer<StringBuffer> w(buf);
+    w.StartObject();
+    w.Key("t"); w.String("book");
+    auto sym = reg.name_for(d.symbol);
+    if (sym) { w.Key("symbol"); w.String(sym->c_str()); }
+    w.Key("snapshot"); w.Bool(true);
+    w.Key("seq"); w.Uint64(d.seq);
+    w.Key("ts"); w.Uint64(d.ts);
+    w.Key("bids"); write_levels(w, d.bid_changes);
+    w.Key("asks"); write_levels(w, d.ask_changes);
+    w.EndObject();
+    return finish(buf);
+}
+
+std::string encode_book_delta(const BookDelta& d, const SymbolRegistry& reg) {
+    StringBuffer buf;
+    Writer<StringBuffer> w(buf);
+    w.StartObject();
+    w.Key("t"); w.String("book_delta");
+    auto sym = reg.name_for(d.symbol);
+    if (sym) { w.Key("symbol"); w.String(sym->c_str()); }
+    w.Key("seq"); w.Uint64(d.seq);
+    w.Key("ts"); w.Uint64(d.ts);
+    w.Key("bids"); write_levels(w, d.bid_changes);
+    w.Key("asks"); write_levels(w, d.ask_changes);
     w.EndObject();
     return finish(buf);
 }

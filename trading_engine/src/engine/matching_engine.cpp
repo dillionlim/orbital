@@ -1,6 +1,7 @@
 #include "engine/matching_engine.hpp"
 
 #include <chrono>
+#include <unordered_map>
 #include <utility>
 #include <variant>
 
@@ -15,6 +16,9 @@ MatchingEngine::MatchingEngine(SymbolId symbol, EventBus& bus,
 
 void MatchingEngine::start() {
     running_ = true;
+    // Emit a baseline snapshot (seq=1) before the worker starts, so SnapshotStore
+    // has a coherent starting point even if no orders have flowed yet.
+    publish_initial_snapshot();
     thread_ = std::thread([this] { worker_loop(); });
 }
 
@@ -161,7 +165,7 @@ void MatchingEngine::worker_loop() {
                 ? OrderStatus::Filled : OrderStatus::PartiallyFilled;
             bus_.publish(me);
         }
-        publish_snapshot();
+        publish_book_change();
     };
 
     auto handle_cancel = [&](const CancelOrderCmd& cmd) {
@@ -176,7 +180,7 @@ void MatchingEngine::worker_loop() {
             e.kind = ExecutionReport::Kind::CancelAck;
             e.status = OrderStatus::Cancelled;
             bus_.publish(e);
-            publish_snapshot();
+            publish_book_change();
         } else {
             e.kind = ExecutionReport::Kind::Reject;
             e.status = OrderStatus::Rejected;
@@ -204,13 +208,75 @@ void MatchingEngine::worker_loop() {
     LOG_INFO("matching shard down: symbol_id=" << symbol_);
 }
 
-void MatchingEngine::publish_snapshot() {
-    bus_.publish(BookSnapshotEvent{
-        .symbol = symbol_,
-        .ts     = now_ms(),
-        .bids   = book_.top_n_bids(20),
-        .asks   = book_.top_n_asks(20),
+void MatchingEngine::publish_initial_snapshot() {
+    auto bids = book_.top_n_bids(20);
+    auto asks = book_.top_n_asks(20);
+    seq_ = 1;
+    bus_.publish(BookDelta{
+        .symbol       = symbol_,
+        .ts           = now_ms(),
+        .seq          = seq_,
+        .snapshot     = true,
+        .bid_changes  = bids,
+        .ask_changes  = asks,
     });
+    prev_bids_ = std::move(bids);
+    prev_asks_ = std::move(asks);
+}
+
+namespace {
+
+// Diff two top-N price ladders into BookLevel changes. qty=0 in the result
+// signals removal; qty>0 signals add-or-update. Order of changes is unspecified
+// — the consumer applies them as a set, then re-sorts.
+std::vector<BookLevel> diff_levels(const std::vector<BookLevel>& prev,
+                                   const std::vector<BookLevel>& curr) {
+    std::vector<BookLevel> changes;
+    std::unordered_map<Price, Quantity> prev_map;
+    prev_map.reserve(prev.size());
+    for (const auto& l : prev) prev_map[l.price] = l.qty;
+    std::unordered_map<Price, Quantity> curr_map;
+    curr_map.reserve(curr.size());
+    for (const auto& l : curr) curr_map[l.price] = l.qty;
+    // Removals.
+    for (const auto& [p, q] : prev_map) {
+        if (curr_map.find(p) == curr_map.end()) {
+            changes.push_back({p, 0});
+        }
+    }
+    // Adds + updates.
+    for (const auto& [p, q] : curr_map) {
+        auto it = prev_map.find(p);
+        if (it == prev_map.end() || it->second != q) {
+            changes.push_back({p, q});
+        }
+    }
+    return changes;
+}
+
+}  // namespace
+
+void MatchingEngine::publish_book_change() {
+    auto bids = book_.top_n_bids(20);
+    auto asks = book_.top_n_asks(20);
+    auto bid_changes = diff_levels(prev_bids_, bids);
+    auto ask_changes = diff_levels(prev_asks_, asks);
+    if (bid_changes.empty() && ask_changes.empty()) {
+        // Nothing in the top-20 actually changed (e.g., a deep limit landed
+        // outside top-20). No need to publish.
+        return;
+    }
+    ++seq_;
+    bus_.publish(BookDelta{
+        .symbol       = symbol_,
+        .ts           = now_ms(),
+        .seq          = seq_,
+        .snapshot     = false,
+        .bid_changes  = std::move(bid_changes),
+        .ask_changes  = std::move(ask_changes),
+    });
+    prev_bids_ = std::move(bids);
+    prev_asks_ = std::move(asks);
 }
 
 }  // namespace TradingSystem

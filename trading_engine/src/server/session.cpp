@@ -1,6 +1,11 @@
 #include "server/session.hpp"
 
+#include <sys/socket.h>
+
 #include <vector>
+
+#include "server/protocol.hpp"
+#include "server/ws_frame.hpp"
 
 namespace TradingSystem {
 
@@ -60,9 +65,55 @@ void SessionRegistry::for_each(const std::function<void(const SessionPtr&)>& fn)
     for (auto& s : snapshot) fn(s);
 }
 
+size_t SessionRegistry::kick_by_client_id(std::string_view client_id) {
+    if (client_id.empty()) return 0;
+    std::vector<SessionPtr> targets;
+    {
+        std::lock_guard<std::mutex> lk(mu_);
+        for (const auto& [_, s] : by_id_) {
+            if (s->is_internal) continue;
+            if (s->client_id == client_id) targets.push_back(s);
+        }
+    }
+    // For each target: write a BOT_PAUSED error + a 1000 close frame so the
+    // client sees a clean disconnect (websockets clients otherwise raise
+    // ConnectionClosedError "no close frame received or sent"). Then
+    // shutdown(SHUT_RDWR) wakes the blocked reader, which exits its loop and
+    // goes through the normal disconnect/erase path. Tiny race: if the session
+    // disconnected between snapshot and shutdown, the fd may have been closed
+    // (EBADF, harmless) or — worst case — reused. Manual user action, rare;
+    // accept it.
+    size_t kicked = 0;
+    for (auto& s : targets) {
+        s->alive = false;
+        if (s->sockfd >= 0) {
+            {
+                std::lock_guard<std::mutex> lk(s->write_mu);
+                ws_write_text(s->sockfd, encode_error("BOT_PAUSED",
+                    "Bot was paused from the dashboard."));
+                ws_write_close(s->sockfd, 1000, "paused");
+            }
+            ::shutdown(s->sockfd, SHUT_RDWR);
+        }
+        ++kicked;
+    }
+    return kicked;
+}
+
 size_t SessionRegistry::size() const {
     std::lock_guard<std::mutex> lk(mu_);
     return by_id_.size();
+}
+
+std::unordered_set<std::string> SessionRegistry::connected_client_ids() const {
+    std::unordered_set<std::string> out;
+    std::lock_guard<std::mutex> lk(mu_);
+    for (const auto& [_, s] : by_id_) {
+        if (s->is_internal) continue;
+        if (!s->alive.load()) continue;
+        if (!s->client_id.empty()) out.insert(s->client_id);
+    }
+    return out;
 }
 
 }  // namespace TradingSystem

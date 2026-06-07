@@ -1,0 +1,20 @@
+{
+  "server": {
+    "port": 2020,
+    "backend_url": "http://localhost:3010",
+    "db_path": "./engine.db",
+    "auth_cache_ttl_seconds": 300
+  },
+  "symbols": [
+    { "name": "BTC-USD", "id": 1, "mid": 50000.0 },
+    { "name": "ETH-USD", "id": 2, "mid": 3000.0 },
+    { "name": "LTC-USD", "id": 3, "mid": 100.0 }
+  ],
+  "market_maker": {
+    "enabled": true,
+    "spread_bps": 20,
+    "size": 10,
+    "refresh_ms": 5000,
+    "track_trades": true
+  }
+}

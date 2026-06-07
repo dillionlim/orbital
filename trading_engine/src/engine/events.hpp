@@ -76,13 +76,30 @@ struct TradePrint {
     Timestamp ts = 0;
 };
 
+// Cached full L2 (top-N) snapshot. Not published on the EventBus; reconstructed
+// by SnapshotStore from the BookDelta stream and served to new WS subscribers
+// + the REST /orderbook handler.
 struct BookSnapshotEvent {
     SymbolId symbol = 0;
     Timestamp ts = 0;
+    uint64_t seq = 0;
     std::vector<BookLevel> bids;
     std::vector<BookLevel> asks;
 };
 
-using OutboundEvent = std::variant<ExecutionReport, TradePrint, BookSnapshotEvent>;
+// Incremental top-N change. `snapshot=true` means "replace state": the changes
+// arrays are the full top-N. Otherwise, each entry is a (price, qty) where
+// qty=0 deletes the level and qty>0 sets/updates it. `seq` is monotonic per
+// symbol; clients verify gap-freedom and re-subscribe on a gap.
+struct BookDelta {
+    SymbolId symbol = 0;
+    Timestamp ts = 0;
+    uint64_t seq = 0;
+    bool snapshot = false;
+    std::vector<BookLevel> bid_changes;
+    std::vector<BookLevel> ask_changes;
+};
+
+using OutboundEvent = std::variant<ExecutionReport, TradePrint, BookDelta>;
 
 }

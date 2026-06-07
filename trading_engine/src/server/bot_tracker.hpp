@@ -1,10 +1,11 @@
 #pragma once
-#include <atomic>
 #include <deque>
 #include <memory>
 #include <mutex>
 #include <string>
+#include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "common/types.hpp"
@@ -30,13 +31,36 @@ public:
     // bots by their self-supplied client_id (instead of just user_id).
     void note_client_id(const std::string& user_id, const std::string& client_id);
 
+    // ---- Pause control --------------------------------------------------
+    //
+    // Pausing is keyed by `client_id` (the user-supplied bot label). Only
+    // the owning user_id can pause/resume their own bots; everyone can see
+    // the paused state (via snapshot) for read-only attribution.
+    //
+    // State is in-memory only — engine restart resets every bot to active.
+    // That's fine for v1; persistence is a P2-ish concern.
+    enum class PauseResult {
+        Ok,
+        NotFound,        // no bot with that client_id has been seen
+        NotOwner,        // requesting user_id doesn't match the bot's owner
+        InternalBot,     // can't pause the in-process market maker
+    };
+
+    [[nodiscard]] PauseResult pause(std::string_view client_id, std::string_view requesting_user_id);
+    [[nodiscard]] PauseResult resume(std::string_view client_id, std::string_view requesting_user_id);
+
+    // Used by Dispatcher on `hello` (and defensively on place_order) to
+    // reject paused bots' traffic. Cheap; called per inbound message.
+    [[nodiscard]] bool is_paused(std::string_view client_id) const;
+
     struct BotSnapshot {
         std::string user_id;
         std::string client_id;
         std::string display_name;       // human label (client_id, "Market Maker", or trimmed user_id)
         std::string strategy_name;      // e.g. "MM (spread quotes)" or "External bot"
         bool is_internal = false;
-        std::string status;             // "active" | "paused"
+        std::string status;             // "active" | "idle" | "paused" | "error"
+        bool paused = false;            // explicit pause flag (set via pause())
         uint64_t orders_placed = 0;
         uint64_t fills = 0;
         uint64_t volume = 0;
@@ -46,7 +70,11 @@ public:
         Timestamp last_activity = 0;
     };
 
-    std::vector<BotSnapshot> snapshot() const;
+    // `connected_client_ids` is the set of client_ids with a live WS session
+    // right now (see SessionRegistry::connected_client_ids). Used to flag
+    // entries whose bot has dropped off as "error" rather than "idle".
+    std::vector<BotSnapshot> snapshot(
+        const std::unordered_set<std::string>& connected_client_ids = {}) const;
 
 private:
     struct Fill {
@@ -85,6 +113,10 @@ private:
     // attribute to the right bot row.
     std::unordered_map<std::string, State> by_key_;
     std::unordered_map<std::string, std::string> user_to_client_;
+
+    // Set of paused client_ids. Lookup is hot (per inbound WS message) so
+    // unordered_set is appropriate. Mutated only via pause()/resume().
+    std::unordered_set<std::string> paused_;
 };
 
 }

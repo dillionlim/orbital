@@ -5,9 +5,12 @@
 
 #include "auth/api_key_authenticator.hpp"
 #include "common/config.hpp"
+#include "persistence/sqlite_store.hpp"
 #include "server/bot_tracker.hpp"
+#include "server/dispatcher.hpp"
 #include "server/metrics.hpp"
 #include "server/recent_trades.hpp"
+#include "server/session.hpp"
 #include "server/snapshot_store.hpp"
 
 namespace TradingSystem {
@@ -21,10 +24,13 @@ public:
                std::shared_ptr<SymbolRegistry> registry,
                std::shared_ptr<SnapshotStore> snapshots,
                std::shared_ptr<RecentTradesCache> trades,
-               std::shared_ptr<BotTracker> bots)
+               std::shared_ptr<BotTracker> bots,
+               SqliteStore& store, SessionRegistry& sessions,
+               Dispatcher& dispatcher)
         : port_(port), metrics_(metrics), auth_(auth),
           registry_(std::move(registry)), snapshots_(std::move(snapshots)),
-          trades_(std::move(trades)), bots_(std::move(bots)) {}
+          trades_(std::move(trades)), bots_(std::move(bots)), store_(store),
+          sessions_(sessions), dispatcher_(dispatcher) {}
 
     // Returns the full HTTP response text. `request` is the raw request (headers+body).
     [[nodiscard]] std::string handle(std::string_view request);
@@ -33,7 +39,12 @@ private:
     [[nodiscard]] std::string handle_orderbook(std::string_view path, std::string_view request);
     [[nodiscard]] std::string handle_auth(std::string_view request);
     [[nodiscard]] std::string handle_trades(std::string_view path);
+    [[nodiscard]] std::string handle_historical_trades(std::string_view path);
     [[nodiscard]] std::string handle_bots();
+    [[nodiscard]] std::string handle_me(std::string_view request);
+    // pause==true → POST /bots/:client_id/pause; false → /resume.
+    [[nodiscard]] std::string handle_bot_pause(std::string_view client_id,
+                                               std::string_view request, bool pause);
     [[nodiscard]] std::string handle_docs(std::string_view path);
 
     int port_;
@@ -43,6 +54,9 @@ private:
     std::shared_ptr<SnapshotStore> snapshots_;
     std::shared_ptr<RecentTradesCache> trades_;
     std::shared_ptr<BotTracker> bots_;
+    SqliteStore& store_;
+    SessionRegistry& sessions_;
+    Dispatcher& dispatcher_;
 };
 
 // Helpers shared with the WS server (CORS, parsing). Defined in rest_handlers.cpp.

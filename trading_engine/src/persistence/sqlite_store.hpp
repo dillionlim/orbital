@@ -42,6 +42,17 @@ struct TradeRecord {
     Timestamp ts = 0;
 };
 
+// Read-side row shape used by historical-trade queries (REST /trades/historical).
+// Symbol stays as the string name because callers don't have a SymbolRegistry.
+struct HistoricalTrade {
+    uint64_t trade_id = 0;
+    std::string symbol_name;
+    Price price = 0.0;
+    Quantity quantity = 0;
+    std::string taker_side;     // "Buy" | "Sell"
+    Timestamp ts = 0;
+};
+
 using PersistRecord = std::variant<OrderRecord, TradeRecord>;
 
 class SqliteStore {
@@ -62,6 +73,16 @@ public:
     void stop();
 
     void enqueue(PersistRecord r);
+
+    // Read historical trades from the persistent store. Used by the
+    // /trades/historical REST endpoint that powers the backtester. Empty
+    // symbol_filter returns trades across all symbols. Range filters in
+    // milliseconds; pass 0 to skip the bound. Hard cap at 50_000 rows.
+    [[nodiscard]] std::vector<HistoricalTrade> query_trades(
+        std::string_view symbol_filter,
+        Timestamp from_ms,
+        Timestamp to_ms,
+        std::size_t limit) const;
 
 private:
     void writer_loop();

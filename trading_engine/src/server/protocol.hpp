@@ -50,6 +50,15 @@ struct ParsedMessage {
 
 [[nodiscard]] std::string encode_execution_report(const ExecutionReport& er, const SymbolRegistry& reg);
 [[nodiscard]] std::string encode_trade(const TradePrint& tp, const SymbolRegistry& reg);
+
+// Full L2 snapshot — sent on subscribe (sourced from SnapshotStore) and on
+// initial-snapshot deltas. Includes `seq` so clients can validate gap-freedom
+// of the delta stream that follows.
 [[nodiscard]] std::string encode_book_snapshot(const BookSnapshotEvent& s, const SymbolRegistry& reg);
+[[nodiscard]] std::string encode_book_snapshot_from_delta(const BookDelta& d, const SymbolRegistry& reg);
+
+// Incremental top-N changes. Each (price, qty) entry: qty=0 means remove,
+// qty>0 means set/update.
+[[nodiscard]] std::string encode_book_delta(const BookDelta& d, const SymbolRegistry& reg);
 
 }

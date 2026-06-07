@@ -111,7 +111,9 @@ void run_docs_server() {
         sockaddr_in c{}; socklen_t cl = sizeof(c);
         int fd = ::accept(sockfd, (sockaddr*)&c, &cl);
         if (fd < 0) continue;
-        char buf[4096] = {0}; ::read(fd, buf, sizeof(buf) - 1);
+        char buf[4096] = {0};
+        ssize_t n = ::read(fd, buf, sizeof(buf) - 1);
+        if (n <= 0) { ::close(fd); continue; }
         std::string path = parse_path_simple(buf);
         std::string fp = "docs/html" + (path == "/" ? std::string("/index.html") : path);
         std::string body = read_file_simple(fp);
@@ -182,6 +184,10 @@ int main(int argc, char* argv[]) {
     EventBus bus;
     SessionRegistry sessions;
 
+    // SnapshotStore reconstructs L2 from the BookDelta stream. Subscribe BEFORE
+    // matching shards start so we don't miss the shards' initial snapshot.
+    snapshots->start(bus);
+
     // Feed the recent-trades cache from the EventBus so /trades has data.
     bus.subscribe([trades_cache](const OutboundEvent& ev) {
         std::visit([&](auto&& e) {
@@ -217,7 +223,7 @@ int main(int argc, char* argv[]) {
     dispatcher.start();
 
     RestRouter rest(cfg.port, metrics, auth, registry, snapshots, trades_cache,
-                    bot_tracker);
+                    bot_tracker, store, sessions, dispatcher);
     WsServer ws(cfg.port, rest, dispatcher, auth, sessions, metrics);
     if (!ws.start()) {
         LOG_ERROR("main: WS server start failed");
@@ -239,6 +245,7 @@ int main(int argc, char* argv[]) {
     store.persist_next_order_id(sequencer.peek_next_order_id());
     sequencer.stop_shards();
     store.stop();
+    snapshots->stop();
     LOG_INFO("main: bye");
     return 0;
 }

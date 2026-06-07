@@ -203,6 +203,55 @@ void SqliteStore::enqueue(PersistRecord r) {
     q_.push(std::move(r));
 }
 
+std::vector<HistoricalTrade> SqliteStore::query_trades(
+    std::string_view symbol_filter,
+    Timestamp from_ms,
+    Timestamp to_ms,
+    std::size_t limit) const {
+    std::vector<HistoricalTrade> out;
+    if (!db_) return out;
+
+    const std::size_t capped_limit = std::min<std::size_t>(limit, 50000);
+
+    // Build the SQL with optional filters. Bind everything to avoid injection
+    // (symbol_filter is user input from the REST query string).
+    std::string sql =
+        "SELECT trade_id, symbol, price, quantity, taker_side, ts_ms FROM trades WHERE 1=1";
+    if (!symbol_filter.empty()) sql += " AND symbol = ?";
+    if (from_ms > 0)            sql += " AND ts_ms >= ?";
+    if (to_ms > 0)              sql += " AND ts_ms <= ?";
+    sql += " ORDER BY ts_ms ASC LIMIT ?";
+
+    sqlite3_stmt* stmt = nullptr;
+    if (::sqlite3_prepare_v2(db_, sql.c_str(), -1, &stmt, nullptr) != SQLITE_OK) {
+        LOG_WARN("sqlite_store: query_trades prepare failed: " << sqlite3_errmsg(db_));
+        return out;
+    }
+
+    int idx = 1;
+    std::string symbol_str(symbol_filter);
+    if (!symbol_filter.empty()) {
+        ::sqlite3_bind_text(stmt, idx++, symbol_str.c_str(), -1, SQLITE_TRANSIENT);
+    }
+    if (from_ms > 0) ::sqlite3_bind_int64(stmt, idx++, static_cast<sqlite3_int64>(from_ms));
+    if (to_ms > 0)   ::sqlite3_bind_int64(stmt, idx++, static_cast<sqlite3_int64>(to_ms));
+    ::sqlite3_bind_int64(stmt, idx++, static_cast<sqlite3_int64>(capped_limit));
+
+    out.reserve(std::min<std::size_t>(capped_limit, 256));
+    while (::sqlite3_step(stmt) == SQLITE_ROW) {
+        HistoricalTrade ht;
+        ht.trade_id = static_cast<uint64_t>(::sqlite3_column_int64(stmt, 0));
+        ht.symbol_name = reinterpret_cast<const char*>(::sqlite3_column_text(stmt, 1));
+        ht.price = ::sqlite3_column_double(stmt, 2);
+        ht.quantity = static_cast<Quantity>(::sqlite3_column_int64(stmt, 3));
+        ht.taker_side = reinterpret_cast<const char*>(::sqlite3_column_text(stmt, 4));
+        ht.ts = static_cast<Timestamp>(::sqlite3_column_int64(stmt, 5));
+        out.push_back(std::move(ht));
+    }
+    ::sqlite3_finalize(stmt);
+    return out;
+}
+
 void SqliteStore::writer_loop() {
     sqlite3_stmt* up_order = nullptr;
     sqlite3_stmt* in_trade = nullptr;

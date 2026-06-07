@@ -7,6 +7,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 
 #include "common/types.hpp"
 #include "engine/events.hpp"
@@ -48,6 +49,18 @@ public:
 
     // Visit all live sessions.
     void for_each(const std::function<void(const SessionPtr&)>& fn) const;
+
+    // Force-disconnect every live session whose client_id matches. Used by the
+    // pause endpoint to drop already-connected bots so they have to reconnect
+    // (and hit the dispatcher's pause check). Returns the number of sessions
+    // kicked. The shutdown(SHUT_RDWR) unblocks the reader thread which then
+    // exits its loop, closes the fd, and erases the session.
+    size_t kick_by_client_id(std::string_view client_id);
+
+    // Snapshot of all client_ids currently holding a live, non-internal WS
+    // session. Used by BotTracker to distinguish "connected but quiet" (idle)
+    // from "previously connected, now gone" (error).
+    [[nodiscard]] std::unordered_set<std::string> connected_client_ids() const;
 
     [[nodiscard]] size_t size() const;
 

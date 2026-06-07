@@ -35,6 +35,13 @@ public:
     void on_message(SessionPtr s, std::string_view payload);
     void on_disconnect(SessionPtr s);
 
+    // Called by the REST `/bots/:id/pause` handler. Cancels every resting
+    // order placed by sessions matching `client_id` so the paused bot stops
+    // having its old orders filled by the MM. Kicking the WS alone leaves
+    // the resting orders on the book — fills against them get attributed to
+    // the (now-disconnected) bot, which looks like the pause didn't take.
+    void cancel_orders_for_client(std::string_view client_id);
+
 private:
     void handle_place(SessionPtr s, const InboundPlaceOrder& p);
     void handle_cancel(SessionPtr s, const InboundCancelOrder& c);

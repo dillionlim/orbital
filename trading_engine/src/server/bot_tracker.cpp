@@ -48,6 +48,36 @@ void BotTracker::note_client_id(const std::string& user_id, const std::string& c
     s.last_activity = now_ms();
 }
 
+BotTracker::PauseResult BotTracker::pause(std::string_view client_id, std::string_view requesting_user_id) {
+    std::lock_guard<std::mutex> lk(mu_);
+    auto it = by_key_.find(std::string(client_id));
+    if (it == by_key_.end()) return PauseResult::NotFound;
+    if (it->second.is_internal || it->second.user_id == kMmUserId) {
+        // The in-process market maker isn't a real session and can't be
+        // disconnected by setting alive=false anyway. Refuse explicitly so
+        // the UI doesn't lie about its effect.
+        return PauseResult::InternalBot;
+    }
+    if (it->second.user_id != requesting_user_id) return PauseResult::NotOwner;
+    paused_.insert(std::string(client_id));
+    return PauseResult::Ok;
+}
+
+BotTracker::PauseResult BotTracker::resume(std::string_view client_id, std::string_view requesting_user_id) {
+    std::lock_guard<std::mutex> lk(mu_);
+    auto it = by_key_.find(std::string(client_id));
+    if (it == by_key_.end()) return PauseResult::NotFound;
+    if (it->second.is_internal || it->second.user_id == kMmUserId) return PauseResult::InternalBot;
+    if (it->second.user_id != requesting_user_id) return PauseResult::NotOwner;
+    paused_.erase(std::string(client_id));
+    return PauseResult::Ok;
+}
+
+bool BotTracker::is_paused(std::string_view client_id) const {
+    std::lock_guard<std::mutex> lk(mu_);
+    return paused_.find(std::string(client_id)) != paused_.end();
+}
+
 void BotTracker::on_event(const OutboundEvent& ev) {
     std::visit([&](auto&& e) {
         using T = std::decay_t<decltype(e)>;
@@ -121,7 +151,8 @@ double BotTracker::mark_value(const State& s) const {
     return mark;
 }
 
-std::vector<BotTracker::BotSnapshot> BotTracker::snapshot() const {
+std::vector<BotTracker::BotSnapshot> BotTracker::snapshot(
+    const std::unordered_set<std::string>& connected_client_ids) const {
     std::vector<BotSnapshot> out;
     Timestamp now = now_ms();
     std::lock_guard<std::mutex> lk(mu_);
@@ -138,8 +169,27 @@ std::vector<BotTracker::BotSnapshot> BotTracker::snapshot() const {
             b.display_name = !s.client_id.empty() ? s.client_id : short_user_label(s.user_id);
             b.strategy_name = "External bot";
         }
-        b.status = (now - s.last_activity) <= static_cast<uint64_t>(kActiveWindowMs)
-                       ? "active" : "paused";
+        b.paused = paused_.find(s.client_id.empty() ? s.user_id : s.client_id) != paused_.end();
+        if (b.paused) {
+            b.status = "paused";
+        } else if (s.is_internal) {
+            // The in-process MM only emits ExecutionReports on fills/cancels —
+            // resting quotes don't bump last_activity. So treat every internal
+            // bot whose row exists as "active": the row only exists because the
+            // MM started and placed at least one order, and pause is rejected
+            // for internal bots upstream.
+            b.status = "active";
+        } else if (!s.client_id.empty() &&
+                   connected_client_ids.find(s.client_id) != connected_client_ids.end()) {
+            // Bot has a live WS session: distinguish recent activity (active)
+            // from connected-but-quiet (idle).
+            b.status = (now - s.last_activity) <= static_cast<uint64_t>(kActiveWindowMs)
+                           ? "active" : "idle";
+        } else {
+            // Was tracked (so connected at some point) but has no live session
+            // now and isn't paused — likely crashed, killed, or lost network.
+            b.status = "error";
+        }
         b.orders_placed = s.orders_placed;
         b.fills = s.fills;
         b.volume = s.volume;
