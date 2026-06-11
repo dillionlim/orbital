@@ -10,6 +10,9 @@
   },
   "dependencies": {
     "@clerk/nextjs": "^6.0.0",
+    "@codemirror/lang-python": "^6.2.1",
+    "@uiw/codemirror-theme-vscode": "^4.25.9",
+    "@uiw/react-codemirror": "^4.25.9",
     "lucide-react": "^1.16.0",
     "next": "^15.0.0",
     "react": "^19.0.0",
