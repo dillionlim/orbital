@@ -86,6 +86,24 @@ ServerConfig load_config(const std::string& path) {
         sc.name = v["name"].GetString();
         sc.id = v["id"].GetUint64();
         sc.mid = v["mid"].GetDouble();
+
+        // Position-cap parsing.
+        //   `max_position` is shorthand: it sets both sides symmetrically.
+        //   `max_long` / `max_short` override (asymmetric caps).
+        // Order matters: read `max_position` first, then let the explicit
+        // fields stomp it so a user can write `{ "max_position": 100,
+        // "max_short": 50 }` to mean "long ≤100, short ≤50".
+        if (v.HasMember("max_position") && v["max_position"].IsUint64()) {
+            const auto m = v["max_position"].GetUint64();
+            sc.max_long = m;
+            sc.max_short = m;
+        }
+        if (v.HasMember("max_long") && v["max_long"].IsUint64()) {
+            sc.max_long = v["max_long"].GetUint64();
+        }
+        if (v.HasMember("max_short") && v["max_short"].IsUint64()) {
+            sc.max_short = v["max_short"].GetUint64();
+        }
         cfg.symbols.push_back(sc);
     }
     if (cfg.symbols.empty()) {
@@ -103,6 +121,52 @@ ServerConfig load_config(const std::string& path) {
             mm.refresh_ms = m["refresh_ms"].GetInt();
         if (m.HasMember("track_trades") && m["track_trades"].IsBool())
             mm.track_trades = m["track_trades"].GetBool();
+        if (m.HasMember("requote_drift_bps") && m["requote_drift_bps"].IsInt())
+            mm.requote_drift_bps = m["requote_drift_bps"].GetInt();
+    }
+
+    if (doc.HasMember("news") && doc["news"].IsObject()) {
+        const auto& n = doc["news"];
+        auto& nc = cfg.news;
+        if (n.HasMember("poll_seconds") && n["poll_seconds"].IsInt())
+            nc.poll_seconds = n["poll_seconds"].GetInt();
+        if (n.HasMember("gemini_model") && n["gemini_model"].IsString())
+            nc.gemini_model = n["gemini_model"].GetString();
+        if (n.HasMember("gemini_api_key") && n["gemini_api_key"].IsString())
+            nc.gemini_api_key = n["gemini_api_key"].GetString();
+        if (n.HasMember("fetch_limit") && n["fetch_limit"].IsInt())
+            nc.fetch_limit = n["fetch_limit"].GetInt();
+        if (n.HasMember("bots") && n["bots"].IsArray()) {
+            for (const auto& b : n["bots"].GetArray()) {
+                if (!b.IsObject()) continue;
+                NewsBotConfig nb;
+                if (b.HasMember("persona") && b["persona"].IsString())
+                    nb.persona = b["persona"].GetString();
+                if (b.HasMember("size_per_signal") && b["size_per_signal"].IsUint64())
+                    nb.size_per_signal = b["size_per_signal"].GetUint64();
+                if (b.HasMember("confidence_threshold") && b["confidence_threshold"].IsNumber())
+                    nb.confidence_threshold = b["confidence_threshold"].GetDouble();
+                if (b.HasMember("size_jitter_pct") && b["size_jitter_pct"].IsInt())
+                    nb.size_jitter_pct = b["size_jitter_pct"].GetInt();
+                if (b.HasMember("price_offset_jitter_bps") && b["price_offset_jitter_bps"].IsInt())
+                    nb.price_offset_jitter_bps = b["price_offset_jitter_bps"].GetInt();
+                if (b.HasMember("noise_interval_seconds") && b["noise_interval_seconds"].IsInt())
+                    nb.noise_interval_seconds = b["noise_interval_seconds"].GetInt();
+                if (b.HasMember("signal_delay_ms") && b["signal_delay_ms"].IsInt())
+                    nb.signal_delay_ms = b["signal_delay_ms"].GetInt();
+
+                // `count` is the new control. Still accept the old
+                // `enabled: bool` for backward compatibility — it maps to
+                // count = (enabled ? 1 : 0). Explicit `count` wins.
+                if (b.HasMember("count") && b["count"].IsInt()) {
+                    nb.count = b["count"].GetInt();
+                } else if (b.HasMember("enabled") && b["enabled"].IsBool()) {
+                    nb.count = b["enabled"].GetBool() ? 1 : 0;
+                }
+                if (nb.count < 0) nb.count = 0;
+                nc.bots.push_back(std::move(nb));
+            }
+        }
     }
 
     return cfg;

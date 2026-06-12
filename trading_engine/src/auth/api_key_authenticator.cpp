@@ -6,6 +6,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include <cstdlib>
 #include <cstring>
 #include <regex>
 
@@ -122,9 +123,24 @@ AuthResult ApiKeyAuthenticator::validateWithBackend(std::string_view apiKey) {
         return {false, ""};
     }
 
-    std::string req = "GET /api-keys/validate?key=" + std::string(apiKey) + " HTTP/1.1\r\n";
+    // POST + body + shared-secret header. Two reasons over the old GET ?key=:
+    //   1. Reverse-proxy and NestJS access logs capture full URLs but never
+    //      bodies, so secrets stop leaking into log files.
+    //   2. The shared secret stops anyone other than this engine from
+    //      hammering /api-keys/validate as a free DB-DoS amplifier.
+    // The shared secret comes from $ORBITAL_ENGINE_SECRET; if unset, we still
+    // try the request — backend will refuse if its own secret is configured,
+    // and dev/local-only setups stay one-step.
+    const char* shared = std::getenv("ORBITAL_ENGINE_SECRET");
+    const std::string secret = shared ? shared : "";
+    const std::string req_body = std::string("{\"key\":\"") + std::string(apiKey) + "\"}";
+    std::string req = "POST /api-keys/validate HTTP/1.1\r\n";
     req += "Host: " + backend_host_ + ":" + std::to_string(backend_port_) + "\r\n";
+    req += "Content-Type: application/json\r\n";
+    req += "Content-Length: " + std::to_string(req_body.size()) + "\r\n";
+    if (!secret.empty()) req += "X-Engine-Secret: " + secret + "\r\n";
     req += "Connection: close\r\n\r\n";
+    req += req_body;
     if (::send(sockfd, req.data(), req.size(), 0) < 0) {
         close(sockfd);
         return {false, ""};
@@ -140,7 +156,12 @@ AuthResult ApiKeyAuthenticator::validateWithBackend(std::string_view apiKey) {
     }
     close(sockfd);
 
-    if (resp.find("200 OK") == std::string::npos) return {false, ""};
+    // Accept any 2xx status. NestJS returns 201 Created on POST routes by
+    // default, so a hardcoded "200 OK" check would treat every key as
+    // invalid (which is exactly the bug that was making /me return 401
+    // for valid keys after the GET→POST validate switch).
+    if (resp.size() < 12 || resp.compare(0, 9, "HTTP/1.1 ") != 0) return {false, ""};
+    if (resp[9] != '2') return {false, ""};
 
     // Skip headers, parse JSON body.
     auto body_start = resp.find("\r\n\r\n");
@@ -165,6 +186,15 @@ AuthResult ApiKeyAuthenticator::validateWithBackend(std::string_view apiKey) {
 }
 
 std::string extractApiKeyFromHttp(std::string_view request) {
+    // Header-only. The previous `?api_key=` / `&api_key=` query-string fallback
+    // was removed because:
+    //   1. URLs end up in reverse-proxy / NestJS / browser-history logs;
+    //      bodies and headers don't.
+    //   2. Query-param auth on POST is a "simple" CORS request — no preflight,
+    //      so any cross-origin page could fire mutating requests with a leaked
+    //      key (combined with the engine's `Allow-Origin: *`). Header auth
+    //      forces a preflight which the browser blocks for unknown origins.
+    //
     // 1. Authorization: Bearer <key>
     size_t authPos = request.find("Authorization:");
     if (authPos == std::string_view::npos) authPos = request.find("authorization:");
@@ -189,17 +219,6 @@ std::string extractApiKeyFromHttp(std::string_view request) {
         if (end == std::string_view::npos) end = request.find("\n", start);
         if (end != std::string_view::npos) return std::string(request.substr(start, end - start));
         return std::string(request.substr(start));
-    }
-
-    // 3. ?api_key= / &api_key=
-    size_t keyPos = request.find("?api_key=");
-    if (keyPos == std::string_view::npos) keyPos = request.find("&api_key=");
-    if (keyPos != std::string_view::npos) {
-        keyPos += 9;
-        size_t end = request.find("&", keyPos);
-        if (end == std::string_view::npos) end = request.find(" ", keyPos);
-        if (end != std::string_view::npos) return std::string(request.substr(keyPos, end - keyPos));
-        return std::string(request.substr(keyPos));
     }
 
     return "";
