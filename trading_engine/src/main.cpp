@@ -2,19 +2,11 @@
 #include <chrono>
 #include <csignal>
 #include <cstdlib>
-#include <cstring>
-#include <fstream>
 #include <iostream>
 #include <memory>
-#include <sstream>
 #include <string>
 #include <thread>
 #include <vector>
-
-#include <arpa/inet.h>
-#include <netinet/in.h>
-#include <sys/socket.h>
-#include <unistd.h>
 
 #include "auth/api_key_authenticator.hpp"
 #include "common/config.hpp"
@@ -23,10 +15,15 @@
 #include "engine/sequencer.hpp"
 #include "feed/index_price_feed.hpp"
 #include "market_maker/mm_bot.hpp"
+#include "news_bot/gemini_client.hpp"
+#include "news_bot/news_analyzer.hpp"
+#include "news_bot/news_bot.hpp"
 #include "persistence/sqlite_store.hpp"
+#include "server/market_flow.hpp"
 #include "server/bot_tracker.hpp"
 #include "server/dispatcher.hpp"
 #include "server/metrics.hpp"
+#include "server/position_tracker.hpp"
 #include "server/recent_trades.hpp"
 #include "server/rest_handlers.hpp"
 #include "server/session.hpp"
@@ -52,7 +49,6 @@ void print_usage(const char* prog) {
               << "  --backend-url <url>   Override NestJS backend URL for API key validation\n"
               << "  --db <path>           Override SQLite database path\n"
               << "  --no-mm               Disable in-process market maker\n"
-              << "  --docs                Run docs server on :8081 instead of trading engine\n"
               << "  --help                Show this help\n";
 }
 
@@ -84,60 +80,6 @@ ServerConfig default_config() {
     return cfg;
 }
 
-// ---- legacy: docs server on :8081 (kept verbatim API) ----
-
-std::string parse_path_simple(const std::string& request) {
-    size_t start = request.find("GET ") + 4;
-    size_t end = request.find(" ", start);
-    if (start == std::string::npos || end == std::string::npos) return "/";
-    return request.substr(start, end - start);
-}
-std::string read_file_simple(const std::string& path) {
-    std::ifstream file(path);
-    if (!file.is_open()) return "<html><body><h1>404 Not Found</h1></body></html>";
-    std::stringstream b; b << file.rdbuf();
-    return b.str();
-}
-std::string content_type_simple(const std::string& path) {
-    if (path.find(".html") != std::string::npos) return "text/html";
-    if (path.find(".css") != std::string::npos) return "text/css";
-    if (path.find(".js") != std::string::npos) return "application/javascript";
-    if (path.find(".png") != std::string::npos) return "image/png";
-    if (path.find(".jpg") != std::string::npos) return "image/jpeg";
-    if (path.find(".svg") != std::string::npos) return "image/svg+xml";
-    return "text/plain";
-}
-std::string http_simple(const std::string& body, const std::string& ct) {
-    std::ostringstream o;
-    o << (body.find("404") != std::string::npos ? "HTTP/1.1 404 Not Found\r\n" : "HTTP/1.1 200 OK\r\n");
-    o << "Content-Type: " << ct << "\r\nContent-Length: " << body.size()
-      << "\r\nConnection: close\r\n\r\n" << body;
-    return o.str();
-}
-void run_docs_server() {
-    int sockfd = ::socket(AF_INET, SOCK_STREAM, 0);
-    int one = 1; ::setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
-    sockaddr_in a{}; a.sin_family = AF_INET; a.sin_addr.s_addr = INADDR_ANY; a.sin_port = htons(8081);
-    if (::bind(sockfd, (sockaddr*)&a, sizeof(a)) < 0) { LOG_ERROR("docs: bind failed"); return; }
-    ::listen(sockfd, 5);
-    LOG_INFO("docs: serving docs/html/ on http://localhost:8081");
-    while (g_running) {
-        sockaddr_in c{}; socklen_t cl = sizeof(c);
-        int fd = ::accept(sockfd, (sockaddr*)&c, &cl);
-        if (fd < 0) continue;
-        char buf[4096] = {0};
-        ssize_t n = ::read(fd, buf, sizeof(buf) - 1);
-        if (n <= 0) { ::close(fd); continue; }
-        std::string path = parse_path_simple(buf);
-        std::string fp = "docs/html" + (path == "/" ? std::string("/index.html") : path);
-        std::string body = read_file_simple(fp);
-        std::string resp = http_simple(body, content_type_simple(path));
-        ::send(fd, resp.data(), resp.size(), 0);
-        ::close(fd);
-    }
-    ::close(sockfd);
-}
-
 }  // namespace
 
 int main(int argc, char* argv[]) {
@@ -145,7 +87,6 @@ int main(int argc, char* argv[]) {
     std::signal(SIGTERM, signal_handler);
     std::signal(SIGPIPE, SIG_IGN);
 
-    bool docs = false;
     bool no_mm = false;
     std::string config_path;
     int port_override = 0;
@@ -155,7 +96,6 @@ int main(int argc, char* argv[]) {
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
         if (arg == "--help" || arg == "-h") { print_usage(argv[0]); return 0; }
-        else if (arg == "--docs") docs = true;
         else if (arg == "--no-mm") no_mm = true;
         else if (arg == "--config" && i + 1 < argc) config_path = argv[++i];
         else if (arg == "--port" && i + 1 < argc) port_override = std::atoi(argv[++i]);
@@ -163,8 +103,6 @@ int main(int argc, char* argv[]) {
         else if (arg == "--db" && i + 1 < argc) db_override = argv[++i];
         else { std::cerr << "Unknown arg: " << arg << "\n"; print_usage(argv[0]); return 1; }
     }
-
-    if (docs) { run_docs_server(); return 0; }
 
     ServerConfig cfg;
     try {
@@ -232,8 +170,21 @@ int main(int argc, char* argv[]) {
     auto bot_tracker = std::make_shared<BotTracker>();
     bot_tracker->start(bus, snapshots);
 
+    // Position tracker subscribes BEFORE the in-process MM starts producing
+    // orders so it sees every Ack from the very first one — otherwise the
+    // open-qty bookkeeping would be off-by-N for any orders placed before
+    // its subscribe call.
+    auto positions = std::make_shared<PositionTracker>(registry);
+    positions->start(bus);
+
+    // Market-flow EMA — feeds news bots' noise direction so emergent
+    // herding/fade dynamics show up even without news. Subscribed early
+    // for the same reason as PositionTracker (don't miss MM's first prints).
+    auto market_flow = std::make_shared<MarketFlow>();
+    market_flow->start(bus);
+
     Dispatcher dispatcher(sequencer, bus, sessions, registry, snapshots, metrics,
-                          bot_tracker);
+                          bot_tracker, positions);
     dispatcher.start();
 
     RestRouter rest(cfg.port, metrics, auth, registry, snapshots, trades_cache,
@@ -252,16 +203,90 @@ int main(int argc, char* argv[]) {
     IndexPriceFeed index_feed(mm, registry, cfg.backend_url, cfg.index_feed_poll_ms);
     index_feed.start();
 
+    // News-analyzer + per-persona news bots. Whole subsystem is opt-in:
+    // skipped entirely if no bot config is enabled OR if GEMINI_API_KEY is
+    // missing/malformed (the GeminiClient validates the key shape).
+    std::unique_ptr<NewsAnalyzer> news_analyzer;
+    std::vector<std::unique_ptr<NewsBot>> news_bots;
+    {
+        int total_instances = 0;
+        for (const auto& nb : cfg.news.bots) if (nb.count > 0) total_instances += nb.count;
+
+        // Bots are constructed unconditionally (when count > 0). The Gemini
+        // analyzer is the only piece that genuinely needs a valid API key —
+        // noise trading runs purely off `noise_interval_seconds` and a
+        // local RNG, so we want it active even when news/Gemini isn't.
+        if (total_instances > 0) {
+            std::string key = cfg.news.gemini_api_key;
+            if (key.empty()) {
+                const char* env_key = std::getenv("GEMINI_API_KEY");
+                if (env_key) key = env_key;
+            }
+
+            std::shared_ptr<GeminiClient> gemini;
+            if (!key.empty()) {
+                gemini = std::make_shared<GeminiClient>(key, cfg.news.gemini_model);
+                if (!gemini->is_configured()) {
+                    LOG_WARN("main: Gemini key rejected (must be alnum + ._- only); "
+                             "news-driven trading disabled, noise traders still active");
+                    gemini.reset();
+                }
+            } else {
+                LOG_WARN("main: no Gemini key (set news.gemini_api_key in server.json or "
+                         "GEMINI_API_KEY env var); news-driven trading disabled, noise "
+                         "traders still active");
+            }
+            if (gemini) {
+                news_analyzer = std::make_unique<NewsAnalyzer>(
+                    cfg.backend_url, registry, gemini,
+                    cfg.news.poll_seconds, cfg.news.fetch_limit);
+            }
+
+            for (const auto& nb_cfg : cfg.news.bots) {
+                if (nb_cfg.count <= 0) continue;
+                for (int i = 1; i <= nb_cfg.count; ++i) {
+                    auto bot = std::make_unique<NewsBot>(
+                        nb_cfg, i, sequencer, registry, bot_tracker, market_flow);
+                    if (news_analyzer) bot->attach_to(*news_analyzer);
+                    else if (bot_tracker)  // still register so the row appears
+                        bot_tracker->register_internal_bot(
+                            "internal:news_" + nb_cfg.persona + "_" + std::to_string(i),
+                            "news-" + nb_cfg.persona + "-" + std::to_string(i));
+                    bot->start();   // no-op when noise_interval_seconds == 0
+                    news_bots.push_back(std::move(bot));
+                }
+                // One summary line per persona instead of one per instance —
+                // count=N (with N up in the dozens or higher) would otherwise
+                // drown the boot log in nearly-identical entries.
+                LOG_INFO("news_bot[" << nb_cfg.persona << " ×" << nb_cfg.count << "]: ready"
+                         << " (threshold=" << nb_cfg.confidence_threshold
+                         << " size=" << nb_cfg.size_per_signal
+                         << " jitter=" << nb_cfg.size_jitter_pct << "%/"
+                         << nb_cfg.price_offset_jitter_bps << "bps"
+                         << " noise=" << nb_cfg.noise_interval_seconds << "s"
+                         << " stagger=" << nb_cfg.signal_delay_ms << "ms)");
+            }
+            if (news_analyzer) news_analyzer->start();
+            LOG_INFO("main: news subsystem on (" << news_bots.size() << " bots, "
+                     << (news_analyzer ? "analyzer ON" : "analyzer OFF, noise only") << ")");
+        }
+    }
+
     LOG_INFO("main: ready. Press Ctrl+C to stop.");
 
     while (g_running.load()) std::this_thread::sleep_for(std::chrono::milliseconds(200));
 
     LOG_INFO("main: shutting down…");
     index_feed.stop();
+    if (news_analyzer) news_analyzer->stop();
+    for (auto& nb : news_bots) nb->stop();   // joins noise threads cleanly
+    news_bots.clear();
+    market_flow->stop();
     mm.stop();
     ws.stop();
     dispatcher.stop();
     bot_tracker->stop();
+    positions->stop();
     store.persist_next_order_id(sequencer.peek_next_order_id());
     sequencer.stop_shards();
     store.stop();

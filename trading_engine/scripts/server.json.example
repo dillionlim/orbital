@@ -18,11 +18,42 @@
     { "name": "EWY", "id": 9,  "mid": 197.0 },
     { "name": "FEZ", "id": 10, "mid": 69.0 }
   ],
+  "_position_limits_help": [
+    "Per-symbol position caps are optional. Add to any symbol entry above:",
+    "  { ..., \"max_position\": 100 }                        // symmetric ±100",
+    "  { ..., \"max_long\": 150, \"max_short\": 50 }          // asymmetric",
+    "Caps apply to external users only (in-process MM is exempt). Pre-trade",
+    "check uses (current_position + working_open_qty + new_qty)."
+  ],
   "market_maker": {
     "enabled": true,
     "size": 10,
     "refresh_ms": 1000,
     "track_trades": true,
-    "levels": 8
+    "levels": 8,
+    "requote_drift_bps": 0
+  },
+  "_market_maker_help": [
+    "requote_drift_bps: when an external trade prints this many bps from the",
+    "MM's quote anchor, both sides are cancelled and reposted at the new price.",
+    "0 = use the default of max(spread_bps/2, 5). Lower = MM follows fast moves",
+    "more aggressively (and emits more cancels); higher = stale quotes linger."
+  ],
+  "news": {
+    "poll_seconds": 30,
+    "gemini_model": "gemini-2.5-flash",
+    "gemini_api_key": "",
+    "fetch_limit": 200,
+    "bots": [
+      { "count": 0, "persona": "momentum",   "size_per_signal": 5, "confidence_threshold": 0.6,  "size_jitter_pct": 25, "price_offset_jitter_bps": 15, "noise_interval_seconds": 0, "signal_delay_ms": 3000 },
+      { "count": 0, "persona": "contrarian", "size_per_signal": 3, "confidence_threshold": 0.7,  "size_jitter_pct": 25, "price_offset_jitter_bps": 15, "noise_interval_seconds": 0, "signal_delay_ms": 3000 },
+      { "count": 0, "persona": "scalper",    "size_per_signal": 4, "confidence_threshold": 0.65, "size_jitter_pct": 30, "price_offset_jitter_bps": 8,  "noise_interval_seconds": 0, "signal_delay_ms": 3000 }
+    ],
+    "_bots_signal_delay_help": [
+      "signal_delay_ms: each bot instance waits a random delay in [0, signal_delay_ms]",
+      "before reacting to a Gemini news signal. Spreads a count=N cohort across the",
+      "window so the MM can requote between waves of bot fills (gradual price",
+      "discovery). 0 = legacy synchronous fire (all instances hit the book at once)."
+    ]
   }
 }

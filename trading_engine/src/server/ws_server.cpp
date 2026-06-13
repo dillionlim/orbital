@@ -158,7 +158,37 @@ void WsServer::handle_connection(int sockfd) {
         return;
     }
 
+    // Auth precedence on WS upgrade:
+    //   1. Authorization / Api-Key headers (used by Python bots; lib.py sets
+    //      Api-Key explicitly).
+    //   2. Sec-WebSocket-Protocol: orbital.bearer, <key>  — used by browsers,
+    //      which can't set custom headers on the WebSocket constructor but
+    //      CAN pass subprotocol values via `new WebSocket(url, [...])`.
+    // The query-string `?api_key=` form was removed (URLs leak to logs).
     std::string api_key = extractApiKeyFromHttp(req);
+    std::string echo_subproto;  // sent back in 101 if we used the subprotocol path
+    if (api_key.empty()) {
+        const std::string proto_hdr = get_header(req, "Sec-WebSocket-Protocol");
+        if (!proto_hdr.empty()) {
+            // Comma-separated list; we want "orbital.bearer" followed by a key.
+            const std::string sentinel = "orbital.bearer";
+            size_t pos = proto_hdr.find(sentinel);
+            if (pos != std::string::npos) {
+                size_t after = pos + sentinel.size();
+                // Skip a comma + optional space.
+                while (after < proto_hdr.size() &&
+                       (proto_hdr[after] == ',' || proto_hdr[after] == ' ')) ++after;
+                size_t end = proto_hdr.find(',', after);
+                if (end == std::string::npos) end = proto_hdr.size();
+                api_key = proto_hdr.substr(after, end - after);
+                // Trim trailing whitespace.
+                while (!api_key.empty() && (api_key.back() == ' ' || api_key.back() == '\r')) {
+                    api_key.pop_back();
+                }
+                echo_subproto = sentinel;
+            }
+        }
+    }
     auto auth_res = auth_.validate(api_key);
     if (!auth_res.valid) {
         const std::string r = http_response(401, "{\"error\":\"invalid_api_key\"}",
@@ -168,8 +198,9 @@ void WsServer::handle_connection(int sockfd) {
         return;
     }
 
-    // Send 101.
-    std::string handshake = ws_handshake_response(sec_key);
+    // Send 101. If we accepted via subprotocol, the server MUST echo the
+    // selected one back per RFC 6455 §4.2.2 — otherwise browsers reject.
+    std::string handshake = ws_handshake_response(sec_key, echo_subproto);
     if (::send(sockfd, handshake.data(), handshake.size(), MSG_NOSIGNAL) < 0) {
         ::close(sockfd);
         return;

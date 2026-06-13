@@ -26,3 +26,13 @@ body {
 nextjs-portal {
   display: none !important;
 }
+
+/* Used by code blocks (e.g. JSON preview on /config-generator). The body
+   `font-family: Arial` rule above inherits everywhere and beats Tailwind's
+   `font-mono` utility (the Geist-Mono CSS var doesn't reliably resolve
+   under Next's font loader), so we hard-code a robust monospace stack
+   that wins over the inherited body font. */
+.font-code {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Monaco, Consolas,
+    "Liberation Mono", "Courier New", monospace;
+}

@@ -31,6 +31,13 @@ public:
     // bots by their self-supplied client_id (instead of just user_id).
     void note_client_id(const std::string& user_id, const std::string& client_id);
 
+    // Pre-register an in-process bot so it appears in /bots immediately,
+    // even before its first ExecutionReport. Without this, news bots stay
+    // invisible until their first headline arrives — which can be tens of
+    // minutes after engine start.
+    void register_internal_bot(const std::string& user_id,
+                               const std::string& client_id);
+
     // ---- Pause control --------------------------------------------------
     //
     // Pausing is keyed by `client_id` (the user-supplied bot label). Only
@@ -51,7 +58,9 @@ public:
 
     // Used by Dispatcher on `hello` (and defensively on place_order) to
     // reject paused bots' traffic. Cheap; called per inbound message.
-    [[nodiscard]] bool is_paused(std::string_view client_id) const;
+    // Takes user_id so two distinct users can't pause each other's bots
+    // by registering the same client_id (the squatting bug).
+    [[nodiscard]] bool is_paused(std::string_view user_id, std::string_view client_id) const;
 
     struct BotSnapshot {
         std::string user_id;
@@ -65,7 +74,9 @@ public:
         uint64_t fills = 0;
         uint64_t volume = 0;
         double total_pnl = 0.0;
-        double hourly_pnl = 0.0;
+        double hourly_pnl = 0.0;        // realized PnL over the last 60min (kept for compat)
+        double windowed_pnl = 0.0;      // realized PnL over the requested window
+        int64_t window_ms = 0;          // window used to compute windowed_pnl
         Timestamp first_seen = 0;
         Timestamp last_activity = 0;
     };
@@ -73,8 +84,11 @@ public:
     // `connected_client_ids` is the set of client_ids with a live WS session
     // right now (see SessionRegistry::connected_client_ids). Used to flag
     // entries whose bot has dropped off as "error" rather than "idle".
+    // `window_ms` controls the rolling window for windowed_pnl (clamped
+    // 1s..24h server-side). hourly_pnl is always 60min for backward compat.
     std::vector<BotSnapshot> snapshot(
-        const std::unordered_set<std::string>& connected_client_ids = {}) const;
+        const std::unordered_set<std::string>& connected_client_ids = {},
+        int64_t window_ms = 60 * 60 * 1000) const;
 
 private:
     struct Fill {
@@ -101,20 +115,30 @@ private:
     static void prune_old(std::deque<Fill>& q, Timestamp now);
     double mark_value(const State& s) const;
 
+    // All map keys here use the COMPOSITE form `user_id + "::" + client_id`
+    // (or `user_id + "::" + user_id` if the bot didn't supply a client_id).
+    // Without the user_id half, an attacker who connected first with a
+    // victim's known client_id would steal the row and could later block the
+    // real owner from pausing/resuming.
+    [[nodiscard]] static std::string compose_key(std::string_view user_id,
+                                                 std::string_view client_id);
+
     EventBus* bus_ = nullptr;
     EventBus::SubscriberId sub_id_ = 0;
     std::shared_ptr<SnapshotStore> snapshots_;
 
     mutable std::mutex mu_;
-    // Keyed by `client_id` when the bot supplied one, else `user_id`. This way
-    // multiple scripts sharing an API key but using distinct client_ids each get
-    // their own row. The map below remembers user_id → most-recent-known
-    // client_id so maker-side fills (which carry user_id from the resting order)
-    // attribute to the right bot row.
+    // user_id::client_id → State. Two different users with the same client_id
+    // get distinct rows (and distinct pause flags). user_to_client_ remembers
+    // each user's most-recent-known client_id so maker-side fills (which carry
+    // user_id from the resting order) still attribute to the right bot row.
+    // user_row_count_ tracks the number of distinct client_ids per user so we
+    // can enforce kMaxClientIdsPerUser in O(1) without scanning by_key_.
     std::unordered_map<std::string, State> by_key_;
     std::unordered_map<std::string, std::string> user_to_client_;
+    std::unordered_map<std::string, size_t> user_row_count_;
 
-    // Set of paused client_ids. Lookup is hot (per inbound WS message) so
+    // Set of paused composite keys. Lookup is hot (per inbound WS message) so
     // unordered_set is appropriate. Mutated only via pause()/resume().
     std::unordered_set<std::string> paused_;
 };

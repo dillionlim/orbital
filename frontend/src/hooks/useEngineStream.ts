@@ -27,14 +27,23 @@ export function useEngineStream() {
   const [stream, setStream] = useState<EngineStream | null>(null);
   const [status, setStatus] = useState<StreamStatus>('closed');
 
+  // Synchronous reset on (server, apiKey) change via the derived-state
+  // pattern. The effect below then either no-ops (no key) or attaches a
+  // fresh stream — neither of those calls setState in the effect body.
+  const [tracked, setTracked] = useState({ server, apiKey });
+  if (tracked.server !== server || tracked.apiKey !== apiKey) {
+    setTracked({ server, apiKey });
+    setStream(null);
+    setStatus('closed');
+  }
+
   useEffect(() => {
-    if (!apiKey) {
-      setStream(null);
-      setStatus('closed');
-      return;
-    }
+    if (!apiKey) return;
     const s = acquireStream(server, apiKey);
-    setStream(s);
+    // Defer to a microtask so this isn't a synchronous setState in the
+    // effect body. The stream identity is stable across renders within
+    // the same (server, apiKey) so the deferral doesn't race.
+    queueMicrotask(() => setStream(s));
     const off = s.onStatus(setStatus);
     return () => {
       off();

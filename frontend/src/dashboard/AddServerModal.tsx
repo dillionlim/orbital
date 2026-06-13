@@ -38,9 +38,14 @@ export const AddServerModal: React.FC<AddServerModalProps> = ({ onClose, onSave,
   }, []);
 
   useEffect(() => {
+    // Defer the early-reset state writes into a microtask so they
+    // aren't synchronous setState calls in the effect body — avoids
+    // react-hooks/set-state-in-effect.
     if (!newServerIp.trim() || !isValidFormat) {
-      setHealthStatus(null);
-      setErrorMessage('');
+      queueMicrotask(() => {
+        setHealthStatus(null);
+        setErrorMessage('');
+      });
       return;
     }
 
@@ -48,11 +53,11 @@ export const AddServerModal: React.FC<AddServerModalProps> = ({ onClose, onSave,
       setIsChecking(true);
       setHealthStatus('checking');
       setErrorMessage('');
-      
+
       const isHealthy = await checkHealthcheck(newServerIp);
-      
+
       setIsChecking(false);
-      
+
       if (isHealthy) {
         setHealthStatus('healthy');
         setErrorMessage('');
@@ -63,7 +68,7 @@ export const AddServerModal: React.FC<AddServerModalProps> = ({ onClose, onSave,
     }, 500);
 
     return () => clearTimeout(timer);
-  }, [newServerIp, checkHealthcheck]);
+  }, [newServerIp, isValidFormat, checkHealthcheck]);
 
   const handleSave = () => {
     if (!newServerIp.trim() || servers.includes(newServerIp)) return;

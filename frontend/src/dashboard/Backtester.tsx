@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { Card } from '../ui/Card';
 import { PlayCircle, Loader2, AlertCircle, Code, Upload, FileCode, Plus, Trash2 } from 'lucide-react';
@@ -6,10 +6,10 @@ import {
   AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer,
   ReferenceLine,
 } from 'recharts';
+import { useSymbols } from '../services/symbols';
 import { runBacktest, downsamplePoints } from '../services/backtest/runner';
 import { fetchHistoricalTrades, fetchBacktestTrades } from '../services/backtest/historical';
 import { compilePythonStrategy, EXAMPLE_PY, EXAMPLE_PARAMS } from '../services/backtest/pythonStrategy';
-import { SYMBOLS } from './symbols';
 import type { BacktestParams, BacktestResult, HistoricalTrade, Strategy } from '../services/backtest/types';
 
 // CodeMirror + the Python language pack add ~200KB. Lazy-load so the rest
@@ -91,7 +91,16 @@ export const Backtester: React.FC = () => {
   const [pythonError, setPythonError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const [symbol, setSymbol] = useState<string>(SYMBOLS[0]);
+  const { names: symbolNames } = useSymbols();
+  const [symbol, setSymbol] = useState<string>('');
+
+  // Initial selection comes from the engine — pick the first symbol once
+  // /symbols resolves. Snap back to a known symbol if a server switch
+  // dropped the previously-selected one.
+  useEffect(() => {
+    if (symbolNames.length === 0) return;
+    if (!symbol || !symbolNames.includes(symbol)) setSymbol(symbolNames[0]);
+  }, [symbolNames, symbol]);
   const [datasetIdx, setDatasetIdx] = useState<number>(2); // 0=Live · 1=Daily 10y · 2=Minute 2y
   const [periodIdx, setPeriodIdx] = useState<number>(1);
   const [initialCash, setInitialCash] = useState<number>(100_000);
@@ -379,9 +388,12 @@ export const Backtester: React.FC = () => {
                 title="Select symbol"
                 value={symbol}
                 onChange={(e) => setSymbol(e.target.value)}
-                className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1.5 text-xs text-white outline-none focus:border-blue-500"
+                disabled={symbolNames.length === 0}
+                className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1.5 text-xs text-white outline-none focus:border-blue-500 disabled:opacity-50"
               >
-                {SYMBOLS.map((s) => (<option key={s} value={s}>{s}</option>))}
+                {symbolNames.length === 0
+                  ? <option value="">(loading…)</option>
+                  : symbolNames.map((s) => (<option key={s} value={s}>{s}</option>))}
               </select>
             </div>
 

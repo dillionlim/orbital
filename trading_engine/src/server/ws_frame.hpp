@@ -37,7 +37,11 @@ bool ws_write_pong(int sockfd, std::string_view payload);
 std::string ws_accept_key(const std::string& sec_websocket_key);
 
 // Builds the 101 Switching Protocols response for a successful upgrade.
-std::string ws_handshake_response(const std::string& sec_websocket_key);
+// `selected_subprotocol`, when non-empty, is echoed back in
+// Sec-WebSocket-Protocol so the client accepts the upgrade. RFC 6455 §4.2.2:
+// the server MUST include this header iff it actually selected a subprotocol.
+std::string ws_handshake_response(const std::string& sec_websocket_key,
+                                  std::string_view selected_subprotocol = {});
 
 // Read a full HTTP request from the socket (until \r\n\r\n).
 // Reads only the headers; if a body exists, leaves it on the socket. Returns

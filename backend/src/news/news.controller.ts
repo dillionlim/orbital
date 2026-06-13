@@ -7,8 +7,11 @@ export class NewsController {
 
   @Get()
   async getNews(@Query('limit') limit?: string) {
-    return this.newsService.getLatestNews(
-      limit ? Number(limit) : 50,
-    );
+    // Clamp 1..200. Without an upper bound, `?limit=1000000` would have
+    // Prisma materialise the whole news table into memory — cheap DoS.
+    let n = limit ? Number(limit) : 50;
+    if (!Number.isFinite(n) || n < 1) n = 50;
+    if (n > 200) n = 200;
+    return this.newsService.getLatestNews(Math.floor(n));
   }
 }

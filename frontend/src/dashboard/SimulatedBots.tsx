@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Card } from '../ui/Card';
 import { Info, Activity, Pause, Play } from 'lucide-react';
 import { useCurrentServer } from '../hooks/useCurrentServer';
@@ -101,6 +101,52 @@ export const SimulatedBots: React.FC = () => {
     setBusyId(null);
   };
 
+  // Collapse all internal news bots into a single synthetic row so the
+  // table doesn't blow up when count > 5 across three personas. Sums the
+  // numeric fields and picks the most "alive" status across all of them
+  // ("active" > "idle" > "paused" > "error"), so the badge reflects what
+  // any sibling is currently doing.
+  const displayBots = useMemo<EngineBot[]>(() => {
+    const news: EngineBot[] = [];
+    const rest: EngineBot[] = [];
+    for (const b of bots) {
+      if (b.user_id.startsWith('internal:news_')) news.push(b);
+      else rest.push(b);
+    }
+    if (news.length === 0) return rest;
+
+    // Status precedence: any active bot wins; then idle; then paused; then error.
+    const order: Record<EngineBot['status'], number> = {
+      active: 0, idle: 1, paused: 2, error: 3,
+    };
+    const aggStatus = news.reduce<EngineBot['status']>(
+      (s, b) => (order[b.status] < order[s] ? b.status : s),
+      news[0].status,
+    );
+    const lastActivity = news.reduce((m, b) => Math.max(m, b.last_activity || 0), 0);
+    const firstSeen = news.reduce(
+      (m, b) => (b.first_seen && (m === 0 || b.first_seen < m) ? b.first_seen : m),
+      0,
+    );
+    const synthetic: EngineBot = {
+      user_id: 'internal:news_aggregate',
+      client_id: '',
+      name: `News bots (${news.length})`,
+      strategy_name: 'News-driven (Gemini, all personas)',
+      is_internal: true,
+      status: aggStatus,
+      paused: news.every((b) => b.paused),
+      orders_placed: news.reduce((s, b) => s + (b.orders_placed || 0), 0),
+      fills: news.reduce((s, b) => s + (b.fills || 0), 0),
+      volume: news.reduce((s, b) => s + (b.volume || 0), 0),
+      total_pnl: news.reduce((s, b) => s + (b.total_pnl || 0), 0),
+      hourly_pnl: news.reduce((s, b) => s + (b.hourly_pnl || 0), 0),
+      first_seen: firstSeen,
+      last_activity: lastActivity,
+    };
+    return [synthetic, ...rest];
+  }, [bots]);
+
   const dotColor = (b: EngineBot) => {
     if (b.paused || b.status === 'paused') return 'bg-yellow-500';
     if (b.status === 'error') return 'bg-red-500';
@@ -134,7 +180,7 @@ export const SimulatedBots: React.FC = () => {
               </tr>
             </thead>
             <tbody className="text-sm divide-y divide-slate-800">
-              {bots.map((bot) => {
+              {displayBots.map((bot) => {
                 const id = bot.client_id || bot.user_id;
                 const isOwn = !!engineUserId && bot.user_id === engineUserId && !bot.is_internal;
                 const busy = busyId === id;

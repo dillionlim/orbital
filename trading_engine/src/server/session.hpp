@@ -50,16 +50,19 @@ public:
     // Visit all live sessions.
     void for_each(const std::function<void(const SessionPtr&)>& fn) const;
 
-    // Force-disconnect every live session whose client_id matches. Used by the
-    // pause endpoint to drop already-connected bots so they have to reconnect
-    // (and hit the dispatcher's pause check). Returns the number of sessions
-    // kicked. The shutdown(SHUT_RDWR) unblocks the reader thread which then
-    // exits its loop, closes the fd, and erases the session.
-    size_t kick_by_client_id(std::string_view client_id);
+    // Force-disconnect every live session whose `(user_id, client_id)` pair
+    // matches. Used by the pause endpoint to drop already-connected bots so
+    // they have to reconnect (and hit the dispatcher's pause check). Filtering
+    // by user_id is mandatory: two distinct users may share a client_id, and
+    // one user's pause must not kick the other's session. Returns the number
+    // of sessions kicked. The shutdown(SHUT_RDWR) unblocks the reader thread
+    // which then exits its loop, closes the fd, and erases the session.
+    size_t kick_by_client_id(std::string_view user_id, std::string_view client_id);
 
-    // Snapshot of all client_ids currently holding a live, non-internal WS
-    // session. Used by BotTracker to distinguish "connected but quiet" (idle)
-    // from "previously connected, now gone" (error).
+    // Snapshot of all `user_id::client_id` composites currently holding a
+    // live, non-internal WS session. Used by BotTracker to distinguish
+    // "connected but quiet" (idle) from "previously connected, now gone"
+    // (error). Composite key matches BotTracker::compose_key.
     [[nodiscard]] std::unordered_set<std::string> connected_client_ids() const;
 
     [[nodiscard]] size_t size() const;

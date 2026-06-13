@@ -1,0 +1,1009 @@
+openapi: 3.0.0
+info:
+  title: Bubbles Trading Engine API
+  description: |
+    REST API for Bubbles Trading Engine. Use this API for historical data, account management, and exchange information.
+    
+    ## Authentication
+    Include API key in header: `X-API-Key: your-api-key`
+    
+    ## Base URL
+    `http://localhost:8080/v1`
+    
+    ## Rate Limits
+    - 60 requests per minute
+    - 1000 requests per hour for market data
+  version: 1.0.0
+  contact:
+    name: Bubbles Support
+    url: https://bubbles.example/support
+
+servers:
+  - url: http://localhost:8080/v1
+    description: Local development server
+
+tags:
+  - name: Market Data
+    description: Real-time and historical market data
+  - name: Trading
+    description: Order placement and management
+  - name: Account
+    description: Account balances and positions
+
+paths:
+  /exchangeinfo:
+    get:
+      tags:
+        - Market Data
+      summary: Get exchange information
+      description: Returns metadata about the exchange including supported symbols, tick sizes, etc.
+      operationId: getExchangeInfo
+      responses:
+        '200':
+          description: Exchange information
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExchangeInfo'
+              
+  /tradingpairs:
+    get:
+      tags:
+        - Market Data
+      summary: Get list of trading pairs
+      description: Returns all available trading pairs with their details
+      operationId: getTradingPairs
+      parameters:
+        - name: symbol
+          in: query
+          schema:
+            type: string
+          description: Filter by symbol (e.g., "BTC/USDT")
+      responses:
+        '200':
+          description: List of trading pairs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TradingPair'
+              
+  /ticker/24hr:
+    get:
+      tags:
+        - Market Data
+      summary: Get 24hr ticker statistics
+      description: Returns 24 hour price change statistics for a symbol or all symbols
+      operationId: get24hrTicker
+      parameters:
+        - name: symbol
+          in: query
+          schema:
+            type: integer
+            format: int64
+          description: Symbol ID (optional, returns all if omitted)
+      responses:
+        '200':
+          description: 24hr ticker data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Ticker24hr'
+              
+  /ticker/price:
+    get:
+      tags:
+        - Market Data
+      summary: Get current price
+      description: Returns the latest price for a symbol
+      operationId: getPrice
+      parameters:
+        - name: symbol
+          in: query
+          required: true
+          schema:
+            type: integer
+            format: int64
+          description: Symbol ID
+      responses:
+        '200':
+          description: Current price
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PriceTick'
+              
+  /ticker/bookTicker:
+    get:
+      tags:
+        - Market Data
+      summary: Get best price/qty
+      description: Returns the best price/qty on the order book for a symbol
+      operationId: getBookTicker
+      parameters:
+        - name: symbol
+          in: query
+          required: true
+          schema:
+            type: integer
+            format: int64
+          description: Symbol ID
+      responses:
+        '200':
+          description: Best bid/ask
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BookTicker'
+              
+  /depth:
+    get:
+      tags:
+        - Market Data
+      summary: Get order book
+      description: Returns the order book for a symbol
+      operationId: getOrderBook
+      parameters:
+        - name: symbol
+          in: query
+          required: true
+          schema:
+            type: integer
+            format: int64
+          description: Symbol ID
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            enum: [5, 10, 20, 50, 100, 500, 1000]
+            default: 100
+          description: Depth of order book
+      responses:
+        '200':
+          description: Order book
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderBook'
+              
+  /trades:
+    get:
+      tags:
+        - Market Data
+      summary: Get recent trades
+      description: Returns recent trades for a symbol
+      operationId: getTrades
+      parameters:
+        - name: symbol
+          in: query
+          required: true
+          schema:
+            type: integer
+            format: int64
+          description: Symbol ID
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+            default: 100
+          description: Number of trades to return
+      responses:
+        '200':
+          description: List of recent trades
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Trade'
+              
+  /aggTrades:
+    get:
+      tags:
+        - Market Data
+      summary: Get aggregated trades
+      description: Returns compressed/aggregrated trades for a symbol
+      operationId: getAggTrades
+      parameters:
+        - name: symbol
+          in: query
+          required: true
+          schema:
+            type: integer
+            format: int64
+          description: Symbol ID
+        - name: startTime
+          in: query
+          schema:
+            type: integer
+            format: int64
+          description: Start time in milliseconds
+        - name: endTime
+          in: query
+          schema:
+            type: integer
+            format: int64
+          description: End time in milliseconds
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+            default: 500
+          description: Maximum number of trades
+      responses:
+        '200':
+          description: Aggregated trades
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AggTrade'
+              
+  /klines:
+    get:
+      tags:
+        - Market Data
+      summary: Get candlestick data
+      description: Returns candlestick/kline data for a symbol
+      operationId: getKlines
+      parameters:
+        - name: symbol
+          in: query
+          required: true
+          schema:
+            type: integer
+            format: int64
+          description: Symbol ID
+        - name: interval
+          in: query
+          required: true
+          schema:
+            type: string
+            enum:
+              - 1m
+              - 3m
+              - 5m
+              - 15m
+              - 30m
+              - 1h
+              - 2h
+              - 4h
+              - 6h
+              - 8h
+              - 12h
+              - 1d
+              - 3d
+              - 1w
+              - 1M
+          description: Candlestick interval
+        - name: startTime
+          in: query
+          schema:
+            type: integer
+            format: int64
+          description: Start time in milliseconds
+        - name: endTime
+          in: query
+          schema:
+            type: integer
+            format: int64
+          description: End time in milliseconds
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1500
+            default: 500
+          description: Maximum number of candles
+      responses:
+        '200':
+          description: Candlestick data
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Kline'
+              
+  /balances:
+    get:
+      tags:
+        - Account
+      summary: Get account balances
+      description: Returns the user's account balances
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: List of balances
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Balance'
+              
+  /positions:
+    get:
+      tags:
+        - Account
+      summary: Get open positions
+      description: Returns the user's open positions
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: List of positions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Position'
+              
+  /orders:
+    post:
+      tags:
+        - Trading
+      summary: Place a new order
+      description: Creates a new order
+      security:
+        - ApiKeyAuth: []
+      operationId: createOrder
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NewOrderRequest'
+      responses:
+        '200':
+          description: Order created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderResponse'
+        '400':
+          description: Invalid order
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              
+    get:
+      tags:
+        - Trading
+      summary: Get open orders
+      description: Returns all open orders or filtered by symbol
+      security:
+        - ApiKeyAuth: []
+      operationId: getOpenOrders
+      parameters:
+        - name: symbol
+          in: query
+          schema:
+            type: integer
+            format: int64
+          description: Filter by symbol ID
+      responses:
+        '200':
+          description: List of open orders
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/OrderResponse'
+              
+  /orders/{orderId}:
+    get:
+      tags:
+        - Trading
+      summary: Get order status
+      description: Returns the status of a specific order
+      security:
+        - ApiKeyAuth: []
+      operationId: getOrder
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+          description: Order ID
+      responses:
+        '200':
+          description: Order details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderResponse'
+              
+    delete:
+      tags:
+        - Trading
+      summary: Cancel order
+      description: Cancels an existing order
+      security:
+        - ApiKeyAuth: []
+      operationId: cancelOrder
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+          description: Order ID to cancel
+      responses:
+        '200':
+          description: Order cancelled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderResponse'
+              
+  /orders/history:
+    get:
+      tags:
+        - Trading
+      summary: Get order history
+      description: Returns filled, cancelled, or rejected orders
+      security:
+        - ApiKeyAuth: []
+      operationId: getOrderHistory
+      parameters:
+        - name: symbol
+          in: query
+          schema:
+            type: integer
+            format: int64
+          description: Filter by symbol
+        - name: startTime
+          in: query
+          schema:
+            type: integer
+            format: int64
+          description: Start time
+        - name: endTime
+          in: query
+          schema:
+            type: integer
+            format: int64
+          description: End time
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 100
+          description: Max records
+      responses:
+        '200':
+          description: Order history
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/OrderResponse'
+              
+  /trades/history:
+    get:
+      tags:
+        - Trading
+      summary: Get trade history
+      description: Returns trades for a user
+      security:
+        - ApiKeyAuth: []
+      operationId: getTradeHistory
+      parameters:
+        - name: symbol
+          in: query
+          schema:
+            type: integer
+            format: int64
+          description: Filter by symbol
+        - name: startTime
+          in: query
+          schema:
+            type: integer
+            format: int64
+          description: Start time
+        - name: endTime
+          in: query
+          schema:
+            type: integer
+            format: int64
+          description: End time
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 100
+          description: Max records
+      responses:
+        '200':
+          description: Trade history
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/UserTrade'
+              
+  /servertime:
+    get:
+      tags:
+        - System
+      summary: Get server time
+      description: Returns the current server time in milliseconds
+      operationId: getServerTime
+      responses:
+        '200':
+          description: Server time
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  serverTime:
+                    type: integer
+                    format: int64
+                    example: 1705012800000
+                    
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      
+  schemas:
+    # Common types
+    Price:
+      type: number
+      format: double
+      example: 50000.25
+      
+    Quantity:
+      type: integer
+      format: int64
+      example: 100
+      
+    Timestamp:
+      type: integer
+      format: int64
+      description: Unix timestamp in milliseconds
+      example: 1705012800000
+      
+    SymbolId:
+      type: integer
+      format: int64
+      description: Internal symbol identifier
+      example: 1
+      
+    OrderId:
+      type: integer
+      format: int64
+      description: Unique order identifier
+      example: 1234567890
+      
+    # Enums
+    OrderSide:
+      type: string
+      enum:
+        - BUY
+        - SELL
+      example: BUY
+      
+    OrderType:
+      type: string
+      enum:
+        - MARKET
+        - LIMIT
+        - STOP
+        - STOP_LOSS_LIMIT
+        - TAKE_PROFIT
+        - TAKE_PROFIT_LIMIT
+        - LIMIT_MAKER
+      example: LIMIT
+      
+    OrderStatus:
+      type: string
+      enum:
+        - NEW
+        - PARTIALLY_FILLED
+        - FILLED
+        - CANCELLED
+        - REJECTED
+        - EXPIRED
+      example: FILLED
+      
+    TimeInForce:
+      type: string
+      enum:
+        - GTC
+        - IOC
+        - FOK
+        - GTX
+      description: |
+        - GTC: Good Till Canceled
+        - IOC: Immediate Or Cancel
+        - FOK: Fill Or Kill
+        - GTX: Good Till Crossing (Post only)
+        
+    # Exchange info
+    ExchangeInfo:
+      type: object
+      properties:
+        timezone:
+          type: string
+          example: "UTC"
+        serverTime:
+          type: integer
+          format: int64
+        symbols:
+          type: array
+          items:
+            $ref: '#/components/schemas/TradingPair'
+            
+    TradingPair:
+      type: object
+      properties:
+        symbolId:
+          type: integer
+          format: int64
+        symbol:
+          type: string
+          example: "BTC/USDT"
+        baseAsset:
+          type: string
+          example: "BTC"
+        quoteAsset:
+          type: string
+          example: "USDT"
+        status:
+          type: string
+          enum:
+            - TRADING
+            - BREAK
+            - HALT
+        priceFilter:
+          $ref: '#/components/schemas/PriceFilter'
+        lotSizeFilter:
+          $ref: '#/components/schemas/LotSizeFilter'
+          
+    PriceFilter:
+      type: object
+      properties:
+        minPrice:
+          type: number
+        maxPrice:
+          type: number
+        tickSize:
+          type: number
+          
+    LotSizeFilter:
+      type: object
+      properties:
+        minQty:
+          type: number
+        maxQty:
+          type: number
+        stepSize:
+          type: number
+          
+    # Market data
+    Ticker24hr:
+      type: object
+      properties:
+        symbolId:
+          type: integer
+          format: int64
+        symbol:
+          type: string
+        priceChange:
+          type: number
+        priceChangePercent:
+          type: number
+        weightedAvgPrice:
+          type: number
+        prevClosePrice:
+          type: number
+        lastPrice:
+          type: number
+        bidPrice:
+          type: number
+        askPrice:
+          type: number
+        openPrice:
+          type: number
+        highPrice:
+          type: number
+        lowPrice:
+          type: number
+        volume:
+          type: number
+        quoteVolume:
+          type: number
+        openTime:
+          type: integer
+          format: int64
+        closeTime:
+          type: integer
+          format: int64
+          
+    PriceTick:
+      type: object
+      properties:
+        symbolId:
+          type: integer
+          format: int64
+        symbol:
+          type: string
+        price:
+          type: number
+          
+    BookTicker:
+      type: object
+      properties:
+        symbolId:
+          type: integer
+          format: int64
+        symbol:
+          type: string
+        bidPrice:
+          type: number
+        bidQty:
+          type: number
+        askPrice:
+          type: number
+        askQty:
+          type: number
+          
+    OrderBook:
+      type: object
+      properties:
+        symbolId:
+          type: integer
+          format: int64
+        symbol:
+          type: string
+        bids:
+          type: array
+          items:
+            type: array
+            items:
+              - type: number
+              - type: number
+        asks:
+          type: array
+          items:
+            type: array
+            items:
+              - type: number
+              - type: number
+          
+    Trade:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        symbolId:
+          type: integer
+          format: int64
+        price:
+          type: number
+        quantity:
+          type: number
+        time:
+          type: integer
+          format: int64
+        isBuyerMaker:
+          type: boolean
+          
+    AggTrade:
+      type: object
+      properties:
+        a:
+          type: integer
+          format: int64
+          description: Aggregate trade ID
+        p:
+          type: number
+          description: Price
+        q:
+          type: number
+          description: Quantity
+        f:
+          type: integer
+          format: int64
+          description: First trade ID
+        l:
+          type: integer
+          format: int64
+          description: Last trade ID
+        T:
+          type: integer
+          format: int64
+          description: Timestamp
+        m:
+          type: boolean
+          description: Is buyer maker
+          
+    Kline:
+      type: array
+      items:
+        type: number
+      description: |
+        Array structure:
+        [
+          1705012800000,  // Open time
+          50000.00,       // Open
+          50100.00,       // High
+          49950.00,       // Low
+          50050.00,       // Close
+          100.5,          // Volume
+          1705016399999,  // Close time
+          5025000.00      // Quote volume
+        ]
+        
+    # Account
+    Balance:
+      type: object
+      properties:
+        asset:
+          type: string
+        available:
+          type: string
+        locked:
+          type: string
+          
+    Position:
+      type: object
+      properties:
+        symbolId:
+          type: integer
+          format: int64
+        symbol:
+          type: string
+        positionSide:
+          type: string
+          enum:
+            - LONG
+            - SHORT
+            - BOTH
+        positionAmt:
+          type: string
+        entryPrice:
+          type: number
+        markPrice:
+          type: number
+        unrealizedProfit:
+          type: number
+        liquidationPrice:
+          type: number
+          
+    # Orders
+    NewOrderRequest:
+      type: object
+      required:
+        - symbolId
+        - side
+        - type
+        - quantity
+      properties:
+        symbolId:
+          type: integer
+          format: int64
+        side:
+          $ref: '#/components/schemas/OrderSide'
+        type:
+          $ref: '#/components/schemas/OrderType'
+        quantity:
+          type: number
+        price:
+          type: number
+        stopPrice:
+          type: number
+        timeInForce:
+          $ref: '#/components/schemas/TimeInForce'
+        clientOrderId:
+          type: string
+        icebergQty:
+          type: number
+        recvWindow:
+          type: integer
+        timestamp:
+          type: integer
+          format: int64
+          
+    OrderResponse:
+      type: object
+      properties:
+        orderId:
+          type: integer
+          format: int64
+        clientOrderId:
+          type: string
+        symbolId:
+          type: integer
+          format: int64
+        status:
+          $ref: '#/components/schemas/OrderStatus'
+        side:
+          $ref: '#/components/schemas/OrderSide'
+        type:
+          $ref: '#/components/schemas/OrderType'
+        timeInForce:
+          $ref: '#/components/schemas/TimeInForce'
+        quantity:
+          type: number
+        price:
+          type: number
+        avgPrice:
+          type: number
+        executedQty:
+          type: number
+        cummulativeQuoteQty:
+          type: number
+        fillCount:
+          type: integer
+        createdTime:
+          type: integer
+          format: int64
+        updatedTime:
+          type: integer
+          format: int64
+        reason:
+          type: string
+          
+    UserTrade:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        symbolId:
+          type: integer
+          format: int64
+        orderId:
+          type: integer
+          format: int64
+        price:
+          type: number
+        quantity:
+          type: number
+        commission:
+          type: number
+        commissionAsset:
+          type: string
+        time:
+          type: integer
+          format: int64
+        isBuyer:
+          type: boolean
+        isMaker:
+          type: boolean
+          
+    ErrorResponse:
+      type: object
+      properties:
+        code:
+          type: integer
+        message:
+          type: string
+        data:
+          type: object
+          properties:
+            reason:
+              type: string

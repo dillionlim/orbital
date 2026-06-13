@@ -1,7 +1,5 @@
 #include "server/ws_frame.hpp"
 
-#include <openssl/evp.h>
-#include <openssl/sha.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
@@ -10,6 +8,7 @@
 #include <vector>
 
 #include "common/log.hpp"
+#include "common/sha1.hpp"
 
 namespace TradingSystem {
 
@@ -72,18 +71,22 @@ std::string base64_encode(const unsigned char* data, size_t len) {
 std::string ws_accept_key(const std::string& sec_websocket_key) {
     static const char kGuid[] = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
     std::string concat = sec_websocket_key + kGuid;
-    unsigned char hash[SHA_DIGEST_LENGTH];
-    ::SHA1(reinterpret_cast<const unsigned char*>(concat.data()), concat.size(), hash);
-    return base64_encode(hash, SHA_DIGEST_LENGTH);
+    uint8_t hash[SHA1_DIGEST_LEN];
+    sha1(concat.data(), concat.size(), hash);
+    return base64_encode(hash, SHA1_DIGEST_LEN);
 }
 
-std::string ws_handshake_response(const std::string& sec_websocket_key) {
+std::string ws_handshake_response(const std::string& sec_websocket_key,
+                                  std::string_view selected_subprotocol) {
     std::ostringstream oss;
     oss << "HTTP/1.1 101 Switching Protocols\r\n"
         << "Upgrade: websocket\r\n"
         << "Connection: Upgrade\r\n"
-        << "Sec-WebSocket-Accept: " << ws_accept_key(sec_websocket_key) << "\r\n"
-        << "\r\n";
+        << "Sec-WebSocket-Accept: " << ws_accept_key(sec_websocket_key) << "\r\n";
+    if (!selected_subprotocol.empty()) {
+        oss << "Sec-WebSocket-Protocol: " << selected_subprotocol << "\r\n";
+    }
+    oss << "\r\n";
     return oss.str();
 }
 
@@ -105,6 +108,15 @@ bool ws_read_frame(int sockfd, WsFrame& out, size_t max_payload) {
     out.fin = (hdr[0] & 0x80) != 0;
     out.opcode = static_cast<WsOpcode>(hdr[0] & 0x0F);
     bool masked = (hdr[1] & 0x80) != 0;
+    // RFC 6455 §5.1: every client→server frame MUST be masked. This function
+    // is only ever called server-side (the WS server reads client frames),
+    // so an unmasked inbound frame is a protocol violation — drop the
+    // connection. Without this check a misbehaving client could spoof on
+    // behalf of another connection by replaying raw bytes.
+    if (!masked) {
+        LOG_WARN("ws_read_frame: unmasked client frame, dropping connection");
+        return false;
+    }
     uint64_t len = hdr[1] & 0x7F;
     if (len == 126) {
         uint8_t ext[2];

@@ -24,5 +24,36 @@
     "refresh_ms": 1000,
     "track_trades": true,
     "levels": 8
+  },
+  "news": {
+    "poll_seconds": 30,
+    "gemini_model": "gemini-2.5-flash",
+    "gemini_api_key": "",
+    "bots": [
+      {
+        "count": 100,
+        "persona": "momentum",
+        "size_per_signal": 5,
+        "confidence_threshold": 0.6,
+        "size_jitter_pct": 25,
+        "price_offset_jitter_bps": 15
+      },
+      {
+        "count": 50,
+        "persona": "contrarian",
+        "size_per_signal": 3,
+        "confidence_threshold": 0.7,
+        "size_jitter_pct": 25,
+        "price_offset_jitter_bps": 15
+      },
+      {
+        "count": 1000,
+        "persona": "scalper",
+        "size_per_signal": 4,
+        "confidence_threshold": 0.65,
+        "size_jitter_pct": 30,
+        "price_offset_jitter_bps": 8
+      }
+    ]
   }
 }

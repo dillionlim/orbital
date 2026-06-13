@@ -3,8 +3,8 @@ import { Card } from '../ui/Card';
 import { Trade } from '../types';
 import { useEngineStream } from '../hooks/useEngineStream';
 import { useCurrentServer } from '../hooks/useCurrentServer';
+import { useSymbols } from '../services/symbols';
 import type { EngineTradeMessage } from '../services/engineStream';
-import { SYMBOLS } from './symbols';
 
 interface EngineTrade {
   trade_id: number;
@@ -44,6 +44,7 @@ export const GlobalTradeTicker: React.FC = () => {
 
   const { stream, status: wsStatus } = useEngineStream();
   const server = useCurrentServer();
+  const { names: symbolNames } = useSymbols();
   const seededRef = useRef(false);
 
   // Wipe the trade list whenever the user switches servers — old trades from
@@ -59,7 +60,8 @@ export const GlobalTradeTicker: React.FC = () => {
 
   useEffect(() => {
     if (!stream) return;
-    const offs = SYMBOLS.map((sym) =>
+    if (symbolNames.length === 0) return;   // wait for /symbols
+    const offs = symbolNames.map((sym) =>
       stream.subscribe<EngineTradeMessage>('trades', sym, (msg) => {
         const t = toTrade(msg);
         setTrades((prev) => {
@@ -71,7 +73,7 @@ export const GlobalTradeTicker: React.FC = () => {
       })
     );
     return () => { offs.forEach((off) => off()); };
-  }, [stream]);
+  }, [stream, symbolNames]);
 
   // ---- One-shot REST seed when WS first opens (so we have history) ---------
   // Without this, the ticker is empty until the next trade lands. Run only

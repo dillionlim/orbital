@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Wifi, WifiOff, LogOut, Plus, User as UserIcon, Menu } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Wifi, WifiOff, LogOut, Plus, User as UserIcon, Menu, ChevronDown } from 'lucide-react';
 import { ConnectionStatus } from '../types';
 import { useClerk, useUser } from '@clerk/nextjs';
 import Link from 'next/link';
@@ -8,7 +8,7 @@ import { AddServerModal } from './AddServerModal';
 import { ApiKeyBadge } from './ApiKeyBadge';
 import { CustomDropdown } from './CustomDropdown';
 import { setCurrentServer as broadcastCurrentServer } from '../hooks/useCurrentServer';
-import BubblesIcon from '../components/BubblesIcon';
+import BubblesIcon from '../ui/BubblesIcon';
 
 const DEFAULT_SERVER = 'localhost:9090';
 const KEY_CURRENT = 'currentServer';
@@ -28,21 +28,27 @@ export const Header: React.FC = () => {
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    let storedServers: string[] = [DEFAULT_SERVER];
-    try {
-      const raw = localStorage.getItem(KEY_SERVERS);
-      if (raw) storedServers = JSON.parse(raw);
-    } catch {
-      /* ignore malformed storage */
-    }
-    const storedCurrent = localStorage.getItem(KEY_CURRENT) || DEFAULT_SERVER;
-    // Always include the default + the current selection in the list so the
-    // user can switch back even if their saved selection is unreachable.
-    const merged = Array.from(new Set([DEFAULT_SERVER, ...storedServers, storedCurrent]));
-    setServers(merged);
-    setCurrentServer(storedCurrent);
-    localStorage.setItem(KEY_SERVERS, JSON.stringify(merged));
-    broadcastCurrentServer(storedCurrent);
+    // Hydration runs in a microtask so the setState calls aren't
+    // synchronous in the effect body — keeps us out of
+    // react-hooks/set-state-in-effect. Functionally equivalent
+    // (microtasks flush before the next paint).
+    queueMicrotask(() => {
+      let storedServers: string[] = [DEFAULT_SERVER];
+      try {
+        const raw = localStorage.getItem(KEY_SERVERS);
+        if (raw) storedServers = JSON.parse(raw);
+      } catch {
+        /* ignore malformed storage */
+      }
+      const storedCurrent = localStorage.getItem(KEY_CURRENT) || DEFAULT_SERVER;
+      // Always include the default + the current selection in the list so the
+      // user can switch back even if their saved selection is unreachable.
+      const merged = Array.from(new Set([DEFAULT_SERVER, ...storedServers, storedCurrent]));
+      setServers(merged);
+      setCurrentServer(storedCurrent);
+      localStorage.setItem(KEY_SERVERS, JSON.stringify(merged));
+      broadcastCurrentServer(storedCurrent);
+    });
   }, []);
   
   // Add Server Modal State
@@ -128,10 +134,41 @@ export const Header: React.FC = () => {
     return () => { alive = false; clearInterval(id); };
   }, [currentServer]);
 
-  const navLinks = [
+  // Profile intentionally not in the top nav anymore — it lives in the
+  // user-menu dropdown to the right, alongside Logout.
+  const navLinks: Array<{ href: string; label: string }> = [
     { href: '/dashboard', label: 'Dashboard' },
-    { href: '/profile', label: 'Profile' },
+    { href: '/config-generator', label: 'Config' },
+    { href: '/docs', label: 'Docs' },
   ];
+
+  // User-menu dropdown: collapses Welcome name + Profile + Logout into a
+  // single avatar button. Without this the right-hand cluster spans 4
+  // separate elements (welcome span, divider, profile icon, logout
+  // button) and crowds the API key badge + server selector.
+  const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
+  const userMenuRef = useRef<HTMLDivElement>(null);
+  const userMenuButtonRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    const onClickOutside = (e: MouseEvent) => {
+      if (userMenuRef.current && !userMenuRef.current.contains(e.target as Node)) {
+        setIsUserMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', onClickOutside);
+    return () => document.removeEventListener('mousedown', onClickOutside);
+  }, []);
+  // aria-expanded is set imperatively rather than through a JSX prop:
+  // Microsoft Edge Tools' axe/aria rule only accepts literal "true" /
+  // "false" string values for ARIA attributes and rejects any JSX
+  // expression (even one that statically resolves to those strings).
+  // Mirroring it via setAttribute keeps the DOM correct without
+  // tripping the static checker.
+  useEffect(() => {
+    userMenuButtonRef.current?.setAttribute(
+      'aria-expanded', isUserMenuOpen ? 'true' : 'false');
+  }, [isUserMenuOpen]);
+  const userLabel = user?.username ?? user?.fullName ?? user?.firstName ?? 'Account';
 
   return (
     <>
@@ -139,9 +176,9 @@ export const Header: React.FC = () => {
         <div className="flex items-center gap-6">
           <Link href="/dashboard" className="flex items-center gap-2">
             <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
-              <BubblesIcon className="text-white w-5 h-5" />
-            </div>
-            <span className="font-bold text-xl tracking-tight text-white hidden md:inline">Bubbles<span className="text-blue-500">Pro</span></span>
+             <BubblesIcon className="text-white w-5 h-5" />
+           </div>
+            <span className="font-bold text-xl tracking-tight text-transparent bg-clip-text bg-gradient-to-br from-sky-300 via-blue-500 to-indigo-600 hidden md:inline">Bubbles</span>
           </Link>
 
           {/* Desktop Navigation */}
@@ -197,29 +234,56 @@ export const Header: React.FC = () => {
           </div>
         </div>
 
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3">
           <div className="hidden md:block">
             <ApiKeyBadge />
           </div>
 
-          <div className="hidden lg:flex flex-col items-end">
-            <span className="text-sm font-medium text-white">Welcome, {user?.username || user?.fullName || user?.firstName}</span>
+          {/* User menu (desktop). Single avatar button → dropdown with
+              welcome name + Profile + Logout. Mirrors CustomDropdown's
+              click-outside handling so it dismisses on background click. */}
+          <div className="relative hidden md:block" ref={userMenuRef}>
+            <button
+              ref={userMenuButtonRef}
+              type="button"
+              onClick={() => setIsUserMenuOpen((v) => !v)}
+              className="flex items-center gap-1.5 p-1.5 pr-2 rounded-full text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+              title={userLabel}
+              aria-haspopup="menu"
+            >
+              <UserIcon className="w-5 h-5" />
+              <ChevronDown className={`w-3.5 h-3.5 transition-transform ${isUserMenuOpen ? 'rotate-180' : ''}`} />
+            </button>
+            {isUserMenuOpen && (
+              <div
+                role="menu"
+                className="absolute right-0 top-full mt-2 w-56 bg-slate-800 border border-slate-700 rounded-md shadow-lg z-50 py-1"
+              >
+                <div className="px-3 py-2 border-b border-slate-700">
+                  <div className="text-[10px] uppercase tracking-wide text-slate-500 font-bold">Signed in as</div>
+                  <div className="text-sm font-medium text-white truncate">{userLabel}</div>
+                </div>
+                <Link
+                  href="/profile"
+                  onClick={() => setIsUserMenuOpen(false)}
+                  className="flex items-center gap-2 px-3 py-2 text-sm text-slate-300 hover:bg-slate-700/60 hover:text-white transition-colors"
+                  role="menuitem"
+                >
+                  <UserIcon className="w-4 h-4" />
+                  Profile
+                </Link>
+                <button
+                  type="button"
+                  onClick={() => { setIsUserMenuOpen(false); signOut(); }}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-sm text-slate-300 hover:bg-slate-700/60 hover:text-red-400 transition-colors"
+                  role="menuitem"
+                >
+                  <LogOut className="w-4 h-4" />
+                  Logout
+                </button>
+              </div>
+            )}
           </div>
-
-          <div className="h-8 w-[1px] bg-slate-700 mx-2 hidden lg:block"></div>
-
-          <Link href="/profile" className="p-2 hover:bg-slate-800 rounded-full text-slate-400 hover:text-white transition-colors" title="Profile">
-            <UserIcon className="w-5 h-5" />
-          </Link>
-
-          <button
-            type="button"
-            onClick={() => signOut()}
-            className="flex items-center gap-2 text-slate-400 hover:text-red-400 transition-colors text-sm font-medium"
-          >
-            <LogOut className="w-4 h-4" />
-            <span className="hidden md:inline">Logout</span>
-          </button>
 
           {/* Mobile Menu */}
           <div className="md:hidden">

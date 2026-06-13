@@ -1,0 +1,21 @@
+# Build artifacts — re-built inside the image
+build/
+cmake-build-*/
+
+# Local SQLite databases
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Editor / VCS noise
+.git/
+.gitignore
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# Local config (mount at runtime instead of baking in)
+scripts/server.json
+.env

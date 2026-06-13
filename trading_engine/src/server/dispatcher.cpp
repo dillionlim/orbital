@@ -11,9 +11,11 @@ namespace TradingSystem {
 Dispatcher::Dispatcher(Sequencer& seq, EventBus& bus, SessionRegistry& sessions,
                        std::shared_ptr<SymbolRegistry> registry,
                        std::shared_ptr<SnapshotStore> snapshots, ServerMetrics& metrics,
-                       std::shared_ptr<BotTracker> bots)
+                       std::shared_ptr<BotTracker> bots,
+                       std::shared_ptr<PositionTracker> positions)
     : seq_(seq), bus_(bus), sessions_(sessions), registry_(std::move(registry)),
-      snapshots_(std::move(snapshots)), metrics_(metrics), bots_(std::move(bots)) {}
+      snapshots_(std::move(snapshots)), metrics_(metrics), bots_(std::move(bots)),
+      positions_(std::move(positions)) {}
 
 Dispatcher::~Dispatcher() { stop(); }
 
@@ -51,7 +53,7 @@ void Dispatcher::on_message(SessionPtr s, std::string_view payload) {
                 // Setting alive=false trips the WS read loop's exit check;
                 // the connection closes and the bot's reconnect attempt will
                 // hit the same check again until it's resumed.
-                if (bots_ && bots_->is_paused(m.hello.client_id)) {
+                if (bots_ && bots_->is_paused(s->user_id, m.hello.client_id)) {
                     send_text(s, encode_error("BOT_PAUSED",
                         "Bot is paused. Resume from the dashboard."));
                     s->alive = false;
@@ -89,11 +91,12 @@ void Dispatcher::on_disconnect(SessionPtr s) {
     }
 }
 
-void Dispatcher::cancel_orders_for_client(std::string_view client_id) {
-    if (client_id.empty()) return;
+void Dispatcher::cancel_orders_for_client(std::string_view user_id, std::string_view client_id) {
+    if (client_id.empty() || user_id.empty()) return;
     std::vector<OrderId> ids;
     sessions_.for_each([&](const SessionPtr& s) {
         if (s->is_internal) return;
+        if (s->user_id != user_id) return;       // squatting fix: per-user filter
         if (s->client_id != client_id) return;
         std::lock_guard<std::mutex> lk(s->orders_mu);
         for (OrderId oid : s->own_orders) ids.push_back(oid);
@@ -119,8 +122,19 @@ void Dispatcher::handle_place(SessionPtr s, const InboundPlaceOrder& p) {
     // Defensive pause check — if the bot got paused after hello (mid-session),
     // refuse new orders even though the WS may still be open. The hello-time
     // check already handles new connections.
-    if (bots_ && !s->client_id.empty() && bots_->is_paused(s->client_id)) {
+    if (bots_ && !s->client_id.empty() && bots_->is_paused(s->user_id, s->client_id)) {
         send_text(s, encode_error("BOT_PAUSED", "Bot is paused"));
+        metrics_.ordersRejected++;
+        return;
+    }
+
+    // Per-symbol position cap. Internal MM is exempt (it explicitly needs
+    // inventory swing to quote both sides). Done here, before submit_place,
+    // so a rejected order never gets an OrderId / persistence row.
+    if (positions_ &&
+        positions_->would_breach(s->user_id, *sym, p.side, p.quantity, s->is_internal)) {
+        send_text(s, encode_error("POSITION_LIMIT",
+            "Order would push position past the configured cap for this symbol"));
         metrics_.ordersRejected++;
         return;
     }

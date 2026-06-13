@@ -4,8 +4,8 @@ import { Order } from '../types';
 import { useApiKey } from '../hooks/useApiKey';
 import { useEngineStream } from '../hooks/useEngineStream';
 import { useCurrentServer } from '../hooks/useCurrentServer';
+import { useSymbols } from '../services/symbols';
 import type { EngineBookMessage, EngineBookDeltaMessage } from '../services/engineStream';
-import { FUTURES_SYMBOLS, ETF_SYMBOLS, DEFAULT_SYMBOL, SYMBOL_LABELS } from './symbols';
 
 const REST_FALLBACK_POLL_MS = 1000;
 
@@ -20,14 +20,24 @@ export const OrderBook: React.FC = () => {
   const [bids, setBids] = useState<Order[]>([]);
   const [asks, setAsks] = useState<Order[]>([]);
   const [filter, setFilter] = useState('');
-  const [symbol, setSymbol] = useState<string>(DEFAULT_SYMBOL);
+  const [symbol, setSymbol] = useState<string>('');
   const [lastUpdate, setLastUpdate] = useState<string>('');
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const { apiKey, isLoading: isApiKeyLoading, refreshApiKey, clearApiKey } = useApiKey();
+  const { isLoading: isApiKeyLoading } = useApiKey();
   const { stream, status: wsStatus } = useEngineStream();
   const server = useCurrentServer();
+  const { names: symbolNames } = useSymbols();
+
+  // If the engine doesn't know the currently-selected symbol (server switch
+  // to a config that doesn't define BTC-USD, for example), snap to the
+  // first symbol the server *does* offer. Skip when the list is still
+  // loading so we don't churn on first mount.
+  useEffect(() => {
+    if (symbolNames.length === 0) return;
+    if (!symbolNames.includes(symbol)) setSymbol(symbolNames[0]);
+  }, [symbolNames, symbol]);
 
   // Wipe accumulated state whenever the user switches trading servers — the
   // old server's bids/asks must NOT leak into a view that's now pointed
@@ -125,26 +135,19 @@ export const OrderBook: React.FC = () => {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 4000);
 
-      const headers: HeadersInit = { 'Content-Type': 'application/json' };
-      if (apiKey) {
-        headers['Authorization'] = `Bearer ${apiKey}`;
-        headers['Api-Key'] = apiKey;
-      }
-
+      // /orderbook is anonymous-friendly on the engine. Sending a key would
+      // make the engine validate it on every poll, and any transient
+      // validation failure (auth-cache miss + backend blip, stale binary)
+      // would 401 us — which used to nuke the user's API key and pop a
+      // "Re-authenticating…" flash on the dashboard. Skip the auth entirely;
+      // there's nothing the key would unlock for this endpoint.
       const response = await fetch(`http://${host}:${port}/orderbook?symbol=${symbolParam}`, {
         method: 'GET',
-        headers,
+        headers: { 'Content-Type': 'application/json' },
         signal: controller.signal,
       });
 
       clearTimeout(timeoutId);
-
-      if (response.status === 401) {
-        clearApiKey();
-        refreshApiKey();
-        setError('Re-authenticating…');
-        return;
-      }
 
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
@@ -163,7 +166,7 @@ export const OrderBook: React.FC = () => {
     } finally {
       setIsLoading(false);
     }
-  }, [symbol, server, apiKey, clearApiKey, refreshApiKey]);
+  }, [symbol, server]);
 
   useEffect(() => {
     if (isApiKeyLoading) return;
@@ -208,17 +211,15 @@ export const OrderBook: React.FC = () => {
             className="bg-slate-700 text-xs text-white border-none rounded px-2 py-1 outline-none"
             value={symbol}
             onChange={(e) => setSymbol(e.target.value)}
+            disabled={symbolNames.length === 0}
           >
-            <optgroup label="Futures">
-              {FUTURES_SYMBOLS.map((s) => (
-                <option key={s} value={s}>{SYMBOL_LABELS[s] ?? s}</option>
-              ))}
-            </optgroup>
-            <optgroup label="ETFs">
-              {ETF_SYMBOLS.map((s) => (
-                <option key={s} value={s}>{SYMBOL_LABELS[s] ?? s}</option>
-              ))}
-            </optgroup>
+            {symbolNames.length === 0 ? (
+              <option value={symbol}>{symbol}</option>
+            ) : (
+              symbolNames.map((s) => (
+                <option key={s} value={s}>{s}</option>
+              ))
+            )}
           </select>
         </div>
       }
