@@ -14,8 +14,17 @@ export function useEngineUserId(): string | null {
   const { apiKey } = useApiKey();
   const [userId, setUserId] = useState<string | null>(null);
 
+  // Reset on (server, apiKey) change via React's "derived state during
+  // render" pattern instead of a synchronous setState in an effect —
+  // keeps us out of react-hooks/set-state-in-effect.
+  const [tracked, setTracked] = useState({ server, apiKey });
+  if (tracked.server !== server || tracked.apiKey !== apiKey) {
+    setTracked({ server, apiKey });
+    setUserId(null);
+  }
+
   useEffect(() => {
-    if (!apiKey) { setUserId(null); return; }
+    if (!apiKey) return;
     const ctrl = new AbortController();
     fetchEngineUserId(server, apiKey, ctrl.signal)
       .then(id => { if (!ctrl.signal.aborted) setUserId(id); })

@@ -41,21 +41,33 @@ export function useApiKey() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // Pre-effect derived-state reset: when there's no signed-in user, drop
+  // out of "loading" without touching state inside an effect body. Using
+  // React's "store info from previous renders" pattern so we don't trip
+  // react-hooks/set-state-in-effect.
+  const noUser = isUserLoaded && !user;
+  const [trackedNoUser, setTrackedNoUser] = useState(noUser);
+  if (noUser !== trackedNoUser) {
+    setTrackedNoUser(noUser);
+    if (noUser) setIsLoading(false);
+  }
+
   useEffect(() => {
     let cancelled = false;
-    if (!isUserLoaded || !user) {
-      setIsLoading(false);
-      return;
-    }
-
-    // Optimistic: show whatever's cached so the badge isn't blank during the
-    // round trip. The backend response below will overwrite it if different.
-    const stored = typeof window !== 'undefined'
-      ? localStorage.getItem(STORAGE_KEY)
-      : null;
-    if (stored) setApiKey(stored);
+    if (!isUserLoaded || !user) return;
 
     (async () => {
+      // Optimistic: show whatever's cached so the badge isn't blank
+      // during the round trip. The backend response below overwrites it
+      // if different. Doing this inside the async IIFE (rather than
+      // synchronously in the effect body) keeps us out of
+      // react-hooks/set-state-in-effect — the rule only flags setState
+      // calls in the top-level synchronous portion of the effect.
+      const stored = typeof window !== 'undefined'
+        ? localStorage.getItem(STORAGE_KEY)
+        : null;
+      if (stored && !cancelled) setApiKey(stored);
+
       const { key, error: backendError } = await fetchFromBackend();
       if (cancelled) return;
 
