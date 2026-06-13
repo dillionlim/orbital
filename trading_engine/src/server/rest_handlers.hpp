@@ -38,14 +38,14 @@ public:
 private:
     [[nodiscard]] std::string handle_orderbook(std::string_view path, std::string_view request);
     [[nodiscard]] std::string handle_auth(std::string_view request);
+    [[nodiscard]] std::string handle_symbols();
     [[nodiscard]] std::string handle_trades(std::string_view path);
     [[nodiscard]] std::string handle_historical_trades(std::string_view path);
-    [[nodiscard]] std::string handle_bots();
+    [[nodiscard]] std::string handle_bots(std::string_view path);
     [[nodiscard]] std::string handle_me(std::string_view request);
     // pause==true → POST /bots/:client_id/pause; false → /resume.
     [[nodiscard]] std::string handle_bot_pause(std::string_view client_id,
                                                std::string_view request, bool pause);
-    [[nodiscard]] std::string handle_docs(std::string_view path);
 
     int port_;
     ServerMetrics& metrics_;

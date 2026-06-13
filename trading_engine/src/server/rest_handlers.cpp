@@ -3,7 +3,6 @@
 #include <sstream>
 
 #include "common/time.hpp"
-#include "server/docs_bundle.hpp"
 #include "server/protocol.hpp"
 
 namespace TradingSystem {
@@ -107,6 +106,9 @@ std::string RestRouter::handle(std::string_view request) {
     if (path.rfind("/orderbook", 0) == 0) {
         return handle_orderbook(path, request);
     }
+    if (path == "/symbols" || path.rfind("/symbols?", 0) == 0) {
+        return handle_symbols();
+    }
     // /trades/historical must match before the /trades prefix below.
     if (path.rfind("/trades/historical", 0) == 0) {
         return handle_historical_trades(path);
@@ -115,7 +117,7 @@ std::string RestRouter::handle(std::string_view request) {
         return handle_trades(path);
     }
     if (path == "/bots" || path.rfind("/bots?", 0) == 0) {
-        return handle_bots();
+        return handle_bots(path);
     }
     // /bots/:client_id/{pause,resume} — POST, requires API key, owner-only.
     if (path.rfind("/bots/", 0) == 0 &&
@@ -136,13 +138,32 @@ std::string RestRouter::handle(std::string_view request) {
     if (path == "/me" || path.rfind("/me?", 0) == 0) {
         return handle_me(request);
     }
-    if (path == "/docs" || path == "/docs/") {
-        return handle_docs("index.html");
-    }
-    if (path.rfind("/docs/", 0) == 0) {
-        return handle_docs(std::string_view(path).substr(6));
-    }
     return http_response(404, "Not Found", "text/plain");
+}
+
+// GET /symbols — anonymous-friendly. Returns the registry as configured at
+// boot so the frontend can populate symbol pickers/subscriptions instead of
+// hardcoding the BTC/ETH/LTC default trio.
+std::string RestRouter::handle_symbols() {
+    std::ostringstream oss;
+    oss << "{\"symbols\":[";
+    const auto& syms = registry_->symbols();
+    for (std::size_t i = 0; i < syms.size(); ++i) {
+        const auto& s = syms[i];
+        if (i) oss << ",";
+        oss << "{\"name\":\"" << s.name << "\""
+            << ",\"id\":" << s.id
+            << ",\"mid\":" << s.mid;
+        // Only emit caps when actually configured — sentinels would mean
+        // "no limit" but the wire shouldn't carry UINT64_MAX.
+        if (s.max_long != kNoPositionLimit)
+            oss << ",\"max_long\":" << s.max_long;
+        if (s.max_short != kNoPositionLimit)
+            oss << ",\"max_short\":" << s.max_short;
+        oss << "}";
+    }
+    oss << "]}";
+    return http_response(200, oss.str(), "application/json");
 }
 
 std::string RestRouter::handle_trades(std::string_view path) {
@@ -235,9 +256,14 @@ std::string RestRouter::handle_historical_trades(std::string_view path) {
     return http_response(200, oss.str(), "application/json");
 }
 
-std::string RestRouter::handle_bots() {
+std::string RestRouter::handle_bots(std::string_view path) {
+    int64_t window_ms = 60 * 60 * 1000;  // default 60min
+    std::string w = parse_query_param(path, "window_ms");
+    if (!w.empty()) {
+        try { window_ms = std::stoll(w); } catch (...) {}
+    }
     auto connected = sessions_.connected_client_ids();
-    auto snaps = bots_ ? bots_->snapshot(connected)
+    auto snaps = bots_ ? bots_->snapshot(connected, window_ms)
                        : std::vector<BotTracker::BotSnapshot>{};
     std::ostringstream oss;
     oss << "{\"bots\":[";
@@ -268,23 +294,14 @@ std::string RestRouter::handle_bots() {
             << ",\"volume\":" << b.volume
             << ",\"total_pnl\":" << b.total_pnl
             << ",\"hourly_pnl\":" << b.hourly_pnl
+            << ",\"windowed_pnl\":" << b.windowed_pnl
+            << ",\"window_ms\":" << b.window_ms
             << ",\"first_seen\":" << b.first_seen
             << ",\"last_activity\":" << b.last_activity
             << "}";
     }
     oss << "]}";
     return http_response(200, oss.str(), "application/json");
-}
-
-std::string RestRouter::handle_docs(std::string_view asset_path) {
-    const auto& assets = docs_assets();
-    auto it = assets.find(std::string(asset_path));
-    if (it == assets.end()) {
-        return http_response(404, "doc asset not found: " + std::string(asset_path), "text/plain");
-    }
-    const auto& a = it->second;
-    std::string body(reinterpret_cast<const char*>(a.data), a.size);
-    return http_response(200, body, a.mime);
 }
 
 std::string RestRouter::handle_auth(std::string_view request) {
@@ -341,8 +358,8 @@ std::string RestRouter::handle_bot_pause(std::string_view client_id,
             // like the pause didn't take. On resume, nothing to do — the bot
             // reconnects on its own.
             if (pause) {
-                dispatcher_.cancel_orders_for_client(client_id);
-                sessions_.kick_by_client_id(client_id);
+                dispatcher_.cancel_orders_for_client(auth_res.user_id, client_id);
+                sessions_.kick_by_client_id(auth_res.user_id, client_id);
             }
             std::ostringstream oss;
             oss << "{\"ok\":true,\"client_id\":\"" << client_id

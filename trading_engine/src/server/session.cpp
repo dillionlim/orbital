@@ -65,27 +65,30 @@ void SessionRegistry::for_each(const std::function<void(const SessionPtr&)>& fn)
     for (auto& s : snapshot) fn(s);
 }
 
-size_t SessionRegistry::kick_by_client_id(std::string_view client_id) {
-    if (client_id.empty()) return 0;
+size_t SessionRegistry::kick_by_client_id(std::string_view user_id, std::string_view client_id) {
+    if (client_id.empty() || user_id.empty()) return 0;
+    // Take the alive→false transition under the registry lock so any writes
+    // we do below race against at most one outstanding I/O on the session
+    // (whatever was already in flight when we flipped the flag). Sessions
+    // that were already !alive when we got here are skipped — without that
+    // guard we could write a paused-close frame onto an fd whose underlying
+    // session already disconnected, and in the worst case the fd has been
+    // recycled to an unrelated freshly-accepted connection.
     std::vector<SessionPtr> targets;
     {
         std::lock_guard<std::mutex> lk(mu_);
         for (const auto& [_, s] : by_id_) {
             if (s->is_internal) continue;
-            if (s->client_id == client_id) targets.push_back(s);
+            if (s->user_id != user_id) continue;       // squatting fix
+            if (s->client_id != client_id) continue;
+            // Atomic exchange: only the caller that flips true→false wins;
+            // anyone else (e.g. the reader thread on a clean close) skips.
+            bool prev = s->alive.exchange(false);
+            if (prev) targets.push_back(s);
         }
     }
-    // For each target: write a BOT_PAUSED error + a 1000 close frame so the
-    // client sees a clean disconnect (websockets clients otherwise raise
-    // ConnectionClosedError "no close frame received or sent"). Then
-    // shutdown(SHUT_RDWR) wakes the blocked reader, which exits its loop and
-    // goes through the normal disconnect/erase path. Tiny race: if the session
-    // disconnected between snapshot and shutdown, the fd may have been closed
-    // (EBADF, harmless) or — worst case — reused. Manual user action, rare;
-    // accept it.
     size_t kicked = 0;
     for (auto& s : targets) {
-        s->alive = false;
         if (s->sockfd >= 0) {
             {
                 std::lock_guard<std::mutex> lk(s->write_mu);
@@ -111,7 +114,10 @@ std::unordered_set<std::string> SessionRegistry::connected_client_ids() const {
     for (const auto& [_, s] : by_id_) {
         if (s->is_internal) continue;
         if (!s->alive.load()) continue;
-        if (!s->client_id.empty()) out.insert(s->client_id);
+        if (s->client_id.empty() || s->user_id.empty()) continue;
+        // Composite key: matches BotTracker's by_key_ scheme so two distinct
+        // users with the same client_id don't see each other's "live" status.
+        out.insert(s->user_id + "::" + s->client_id);
     }
     return out;
 }

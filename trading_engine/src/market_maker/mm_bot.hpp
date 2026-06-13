@@ -1,5 +1,6 @@
 #pragma once
 #include <atomic>
+#include <chrono>
 #include <memory>
 #include <mutex>
 #include <thread>
@@ -31,14 +32,27 @@ private:
         SymbolId symbol = 0;
         Price mid = 0;
         Price last_trade_price = 0;
+        // The price the *currently resting* quotes are anchored to. We
+        // compare last_trade_price against this to decide when external
+        // price action has drifted far enough to make our quotes stale.
+        Price quote_anchor = 0;
         OrderId bid_id = 0;
         OrderId ask_id = 0;
+        // Cooldown timestamp on event-driven requotes so a burst of
+        // trades can't trigger a cancel-and-replace on every print.
+        std::chrono::steady_clock::time_point last_requote_at{};
     };
 
     void seed_quote_locked(State& st);
     void post_side(State& st, OrderSide side);
+    void cancel_side_locked(State& st, OrderSide side);
+    void requote_locked(State& st);
     void on_event(const OutboundEvent& ev);
     void refresh_loop();
+
+    // Resolved at start() from cfg_.requote_drift_bps (or its default).
+    int effective_drift_bps_ = 0;
+    static constexpr int kRequoteCooldownMs = 250;
 
     Sequencer& seq_;
     EventBus& bus_;
