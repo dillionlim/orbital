@@ -17,7 +17,7 @@ import os
 import random
 import sys
 
-from lib import BotClient, env_api_key, env_server, run_with_periodic_tick
+from lib import BotClient, env_server, env_taker_api_key, run_with_periodic_tick
 
 CLIENT_ID = os.environ.get("ORBITAL_BOT_NAME", "random-1")
 SYMBOL = os.environ.get("ORBITAL_SYMBOL", "BTC-USD")
@@ -42,7 +42,7 @@ async def on_tick(bot: BotClient) -> None:
 
 
 async def main() -> None:
-    api = env_api_key()
+    api = env_taker_api_key()
     ws = env_server()
     print(f"[{CLIENT_ID}] connecting to {ws} (sym={SYMBOL} tick={TICK_S}s "
           f"agg-prob={AGGRESSIVE_PROB})")

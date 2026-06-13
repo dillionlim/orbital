@@ -57,6 +57,20 @@ def env_api_key() -> str:
     return key
 
 
+def env_taker_api_key() -> str:
+    """Separate API key for aggressor bots, falling back to ORBITAL_API_KEY.
+
+    The engine has self-trade prevention: when a taker matches a resting
+    order from the same user_id, the resting order is cancelled rather
+    than filled. Without two distinct user_ids, market-making bots in
+    this directory can't actually profit from the takers in this directory
+    — STP eats every cross. Set ORBITAL_TAKER_API_KEY (different account)
+    to give your aggressor bots a separate identity so the maker bots
+    actually fill.
+    """
+    return os.environ.get("ORBITAL_TAKER_API_KEY", "") or env_api_key()
+
+
 def env_server() -> str:
     """Return the WS URL for the engine (default ws://localhost:9090/)."""
     return os.environ.get("ORBITAL_WS", "ws://localhost:9090/")

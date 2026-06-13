@@ -19,7 +19,7 @@ import os
 import sys
 import time
 
-from lib import BotClient, env_api_key, env_server
+from lib import BotClient, env_server, env_taker_api_key
 
 CLIENT_ID = os.environ.get("ORBITAL_BOT_NAME", "mean-rev-1")
 SYMBOL = os.environ.get("ORBITAL_SYMBOL", "BTC-USD")
@@ -31,7 +31,7 @@ EXECUTION_OFFSET = float(os.environ.get("ORBITAL_EXECUTION_OFFSET", "5"))
 
 
 async def main() -> None:
-    api = env_api_key()
+    api = env_taker_api_key()
     ws = env_server()
     history: collections.deque[float] = collections.deque(maxlen=WINDOW)
     last_action_at = 0.0
