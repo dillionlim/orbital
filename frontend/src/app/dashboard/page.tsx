@@ -4,6 +4,8 @@ import { useUser } from "@clerk/nextjs";
 import { Header } from "@/src/dashboard/Header";
 import { GlobalTradeTicker } from "@/src/dashboard/GlobalTradeTicker";
 import { OrderBook } from "@/src/dashboard/OrderBook";
+import { IndicesPanel } from "@/src/dashboard/IndicesPanel";
+import { ReturnsChart } from "@/src/dashboard/ReturnsChart";
 import { PnLCharts } from "@/src/dashboard/PnLCharts";
 import { NewsFeed } from "@/src/dashboard/NewsFeed";
 import { SimulatedBots } from "@/src/dashboard/SimulatedBots";
@@ -22,8 +24,9 @@ export default function Dashboard() {
       
       <main className="p-4 md:p-6 grid grid-cols-1 md:grid-cols-12 gap-6 max-w-[1920px] mx-auto">
         {/* Top Row: Order Book & Bots & News Feed */}
-        <div className="col-span-1 md:col-span-5 lg:col-span-5">
+        <div className="col-span-1 md:col-span-5 lg:col-span-5 space-y-6">
           <OrderBook />
+          <IndicesPanel />
         </div>
         
         <div className="col-span-1 md:col-span-4 lg:col-span-4">
@@ -32,6 +35,11 @@ export default function Dashboard() {
 
         <div className="col-span-1 md:col-span-3 lg:col-span-3">
           <NewsFeed />
+        </div>
+
+        {/* Index returns (full width) */}
+        <div className="col-span-1 md:col-span-12">
+            <ReturnsChart />
         </div>
 
         {/* Middle Row: PnL Charts (Full Width) */}

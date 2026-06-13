@@ -6,11 +6,11 @@ import {
   AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer,
   ReferenceLine,
 } from 'recharts';
-import { useCurrentServer } from '../hooks/useCurrentServer';
 import { runBacktest, downsamplePoints } from '../services/backtest/runner';
-import { fetchHistoricalTrades } from '../services/backtest/historical';
+import { fetchHistoricalTrades, fetchBacktestTrades } from '../services/backtest/historical';
 import { compilePythonStrategy, EXAMPLE_PY, EXAMPLE_PARAMS } from '../services/backtest/pythonStrategy';
-import type { BacktestParams, BacktestResult, Strategy } from '../services/backtest/types';
+import { SYMBOLS } from './symbols';
+import type { BacktestParams, BacktestResult, HistoricalTrade, Strategy } from '../services/backtest/types';
 
 // CodeMirror + the Python language pack add ~200KB. Lazy-load so the rest
 // of the dashboard isn't dragged behind it. SSR off because CodeMirror
@@ -27,8 +27,39 @@ const PythonCodeEditor = dynamic(
   },
 );
 
-const SYMBOLS = ['BTC-USD', 'ETH-USD', 'LTC-USD'];
-const TRADE_LIMIT = 5000;
+const TRADE_LIMIT = 5000;          // live Yahoo feed cap
+const PARQUET_TRADE_LIMIT = 20000; // parquet datasets (backend also strides to this)
+
+// Data sources. 'live' hits the Yahoo candles endpoint (range + interval); the
+// two parquet datasets hit /index-prices/backtest with a granularity + lookback
+// range and carry a modeled top-of-book (bid/ask) so fills cross the spread.
+type LivePeriod = { label: string; range: string; interval: string };
+type ParquetPeriod = { label: string; range: string };
+
+const LIVE_PERIODS: LivePeriod[] = [
+  { label: '1D · 1m', range: '1d', interval: '1m' },
+  { label: '5D · 5m', range: '5d', interval: '5m' },
+  { label: '1M · 30m', range: '1mo', interval: '30m' },
+  { label: '3M · 1d', range: '3mo', interval: '1d' },
+  { label: '6M · 1d', range: '6mo', interval: '1d' },
+];
+const DAILY_PERIODS: ParquetPeriod[] = [
+  { label: '1Y', range: '1y' },
+  { label: '2Y', range: '2y' },
+  { label: '5Y', range: '5y' },
+  { label: '10Y', range: '10y' },
+];
+const MINUTE_PERIODS: ParquetPeriod[] = [
+  { label: '1D', range: '1d' },
+  { label: '5D', range: '5d' },
+  { label: '1M', range: '1mo' },
+];
+
+const DATASETS = [
+  { key: 'live', label: 'Live · Yahoo', periods: LIVE_PERIODS },
+  { key: 'daily', label: 'Parquet · Daily 10y', granularity: 'daily' as const, periods: DAILY_PERIODS },
+  { key: 'minute', label: 'Parquet · Minute 2y', granularity: 'minute' as const, periods: MINUTE_PERIODS },
+] as const;
 
 // User-defined param: spec (key + label) plus current value. Stored together
 // because the value is what the strategy actually consumes — splitting them
@@ -54,7 +85,6 @@ function fmtAxisTime(ms: number): string {
 }
 
 export const Backtester: React.FC = () => {
-  const server = useCurrentServer();
   const [strategy, setStrategy] = useState<Strategy | null>(null);
   const [pythonSource, setPythonSource] = useState<string>(EXAMPLE_PY);
   const [pythonStatus, setPythonStatus] = useState<'idle' | 'compiling' | 'ready' | 'error'>('idle');
@@ -62,6 +92,8 @@ export const Backtester: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [symbol, setSymbol] = useState<string>(SYMBOLS[0]);
+  const [datasetIdx, setDatasetIdx] = useState<number>(2); // 0=Live · 1=Daily 10y · 2=Minute 2y
+  const [periodIdx, setPeriodIdx] = useState<number>(1);
   const [initialCash, setInitialCash] = useState<number>(100_000);
   const [positionSize, setPositionSize] = useState<number>(1);
   const [userParams, setUserParams] = useState<UserParam[]>(EXAMPLE_PARAMS);
@@ -140,10 +172,27 @@ export const Backtester: React.FC = () => {
     setError(null);
     setResult(null);
     try {
-      const trades = await fetchHistoricalTrades({ server, symbol, limit: TRADE_LIMIT });
+      const ds = DATASETS[datasetIdx];
+      const period = ds.periods[periodIdx];
+      let trades: HistoricalTrade[];
+      if (ds.key === 'live') {
+        trades = await fetchHistoricalTrades({
+          symbol,
+          range: period.range,
+          interval: (period as LivePeriod).interval,
+          limit: TRADE_LIMIT,
+        });
+      } else {
+        trades = await fetchBacktestTrades({
+          symbol,
+          granularity: ds.granularity,
+          range: period.range,
+          limit: PARQUET_TRADE_LIMIT,
+        });
+      }
       setTradeCount(trades.length);
       if (trades.length === 0) {
-        setError(`No historical trades for ${symbol} on ${server}. Run some bots first.`);
+        setError(`No data for ${symbol} (${ds.label} · ${period.label}).`);
         return;
       }
       // Build the params dict from the editor: shared (cash/size) + user keys.
@@ -179,7 +228,12 @@ export const Backtester: React.FC = () => {
           then Compile. Required functions:{' '}
           <span className="font-mono text-slate-300">init(params)</span> and{' '}
           <span className="font-mono text-slate-300">on_trade(state, trade, params)</span>. Define
-          the parameters your code needs in the Parameters editor below.
+          the parameters your code needs in the Parameters editor below.{' '}
+          <span className="font-mono text-slate-300">on_trade</span> returns{' '}
+          <span className="font-mono text-slate-300">&quot;buy&quot;/&quot;sell&quot;/&quot;hold&quot;</span>{' '}
+          (market) or an order dict{' '}
+          <span className="font-mono text-slate-300">{'{action, type, limit}'}</span> — types:{' '}
+          <span className="text-slate-300">market · limit · ioc</span>.
         </div>
 
         {/* Python editor */}
@@ -331,6 +385,34 @@ export const Backtester: React.FC = () => {
               </select>
             </div>
 
+            <div className="flex-1 min-w-[150px]">
+              <label className="block text-[10px] uppercase text-slate-500 font-bold mb-1">Dataset</label>
+              <select
+                title="Select data source"
+                value={datasetIdx}
+                onChange={(e) => {
+                  const i = Number(e.target.value);
+                  setDatasetIdx(i);
+                  setPeriodIdx((p) => Math.min(p, DATASETS[i].periods.length - 1));
+                }}
+                className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1.5 text-xs text-white outline-none focus:border-blue-500"
+              >
+                {DATASETS.map((d, i) => (<option key={d.key} value={i}>{d.label}</option>))}
+              </select>
+            </div>
+
+            <div className="flex-1 min-w-[110px]">
+              <label className="block text-[10px] uppercase text-slate-500 font-bold mb-1">Range</label>
+              <select
+                title="Select history range"
+                value={periodIdx}
+                onChange={(e) => setPeriodIdx(Number(e.target.value))}
+                className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1.5 text-xs text-white outline-none focus:border-blue-500"
+              >
+                {DATASETS[datasetIdx].periods.map((p, i) => (<option key={p.label} value={i}>{p.label}</option>))}
+              </select>
+            </div>
+
             <button
               type="button"
               onClick={handleRun}
@@ -344,6 +426,14 @@ export const Backtester: React.FC = () => {
               )}
               {running ? 'Running…' : 'Run backtest'}
             </button>
+
+            {DATASETS[datasetIdx].key !== 'live' && (
+              <div className="w-full text-[10px] text-slate-500 leading-relaxed">
+                L1 dataset — buys fill at <span className="text-slate-400">ask</span>, sells at{' '}
+                <span className="text-slate-400">bid</span> (spread is charged). Index symbols are
+                non-tradeable; their book is notional.
+              </div>
+            )}
           </div>
         )}
 
@@ -359,7 +449,7 @@ export const Backtester: React.FC = () => {
           <div className="flex-1 flex items-center justify-center text-xs text-slate-500 border border-dashed border-slate-700 rounded p-4 text-center">
             Compile a strategy to enable the backtest.
             <br />
-            Replays the last {TRADE_LIMIT.toLocaleString()} trades from {server}.
+            Replays real historical market data (up to {TRADE_LIMIT.toLocaleString()} bars) for the selected symbol &amp; period.
           </div>
         )}
 
@@ -375,7 +465,7 @@ export const Backtester: React.FC = () => {
               <div className="flex justify-between items-center mb-2">
                 <span className="text-xs text-slate-400 font-mono">Equity Curve</span>
                 <span className="text-[10px] text-slate-500 font-mono">
-                  {tradeCount.toLocaleString()} ticks · {result.trades} actions
+                  {tradeCount.toLocaleString()} ticks · {result.trades} fills · {result.canceled} canceled
                 </span>
               </div>
               <div className="flex-1 min-h-0">
@@ -407,8 +497,8 @@ export const Backtester: React.FC = () => {
                     />
                     <Tooltip
                       contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: 4, fontSize: 12 }}
-                      labelFormatter={(ts: number) => new Date(ts).toLocaleString()}
-                      formatter={(v: number | string | undefined) => Number(v ?? 0).toFixed(2)}
+                      labelFormatter={(label) => new Date(Number(label)).toLocaleString()}
+                      formatter={(value) => Number(value ?? 0).toFixed(2)}
                     />
                     <ReferenceLine y={initialCash} stroke="#475569" strokeDasharray="3 3" />
                     <Area type="monotone" dataKey="equity" stroke="#6366f1" fill="url(#bt-equity)" strokeWidth={2} isAnimationActive={false} />
@@ -424,6 +514,7 @@ export const Backtester: React.FC = () => {
               <Stat label="Max drawdown" value={fmtPct(result.maxDrawdown)} tone="neg" />
               <Stat label="Sharpe (per-tick × √N)" value={result.sharpe.toFixed(2)} />
               <Stat label="Trades executed" value={String(result.trades)} />
+              <Stat label="Orders canceled" value={String(result.canceled)} />
               <Stat label="Final position" value={fmtNum(result.finalPosition)} />
             </div>
           </div>

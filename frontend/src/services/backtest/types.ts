@@ -1,10 +1,14 @@
 export interface HistoricalTrade {
   trade_id: number;
   symbol: string;
-  price: number;
+  price: number;        // close / mark price (mid)
   quantity: number;
   taker_side: 'Buy' | 'Sell';
   ts: number;
+  // Top-of-book from the L1 parquet datasets (absent for the live Yahoo feed).
+  // When present the runner fills buys at `ask` and sells at `bid`.
+  bid?: number;
+  ask?: number;
 }
 
 export interface BacktestParams {
@@ -15,8 +19,19 @@ export interface BacktestParams {
 
 export type BacktestAction = 'buy' | 'sell' | 'hold';
 
+// Order types the runner understands:
+//   market — fill now at top-of-book (buy@ask / sell@bid)
+//   limit  — if marketable now, fill now; else rest and fill on a later tick
+//            when the mark price crosses `limit` (filled at `limit`)
+//   ioc    — fill now if marketable at `limit`, otherwise cancel (no rest)
+export type OrderType = 'market' | 'limit' | 'ioc';
+
+// What a strategy emits per tick. `type` defaults to 'market'. `limit` is the
+// limit price — required for 'limit'/'ioc', ignored for 'market'.
 export interface BacktestSignal {
   action: BacktestAction;
+  type?: OrderType;
+  limit?: number;
 }
 
 // Param schema lives entirely in the UI now — the Python source no longer
@@ -49,7 +64,8 @@ export interface BacktestPoint {
 
 export interface BacktestResult {
   points: BacktestPoint[];
-  trades: number;          // count of executed buy/sell signals
+  trades: number;          // count of executed (filled) orders
+  canceled: number;        // IOC orders that weren't marketable + limits never filled
   finalEquity: number;
   totalReturn: number;     // fractional (0.10 = +10%)
   maxDrawdown: number;     // fractional, ≤ 0

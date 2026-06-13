@@ -3,18 +3,26 @@
     "port": 9090,
     "backend_url": "http://localhost:3010",
     "db_path": "./engine.db",
-    "auth_cache_ttl_seconds": 300
+    "auth_cache_ttl_seconds": 300,
+    "index_feed_poll_ms": 1000
   },
   "symbols": [
-    { "name": "BTC-USD", "id": 1, "mid": 50000.0 },
-    { "name": "ETH-USD", "id": 2, "mid": 3000.0 },
-    { "name": "LTC-USD", "id": 3, "mid": 100.0 }
+    { "name": "ES",  "id": 1,  "mid": 7400.0 },
+    { "name": "NKD", "id": 2,  "mid": 67475.0 },
+    { "name": "NQ",  "id": 3,  "mid": 29678.0 },
+    { "name": "YM",  "id": 4,  "mid": 51608.0 },
+    { "name": "RTY", "id": 5,  "mid": 2949.0 },
+    { "name": "SPY", "id": 6,  "mid": 740.0 },
+    { "name": "EWJ", "id": 7,  "mid": 92.0 },
+    { "name": "EWH", "id": 8,  "mid": 22.0 },
+    { "name": "EWY", "id": 9,  "mid": 197.0 },
+    { "name": "FEZ", "id": 10, "mid": 69.0 }
   ],
   "market_maker": {
     "enabled": true,
-    "spread_bps": 20,
     "size": 10,
-    "refresh_ms": 5000,
-    "track_trades": true
+    "refresh_ms": 1000,
+    "track_trades": true,
+    "levels": 8
   }
 }

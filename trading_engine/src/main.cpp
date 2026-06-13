@@ -21,6 +21,7 @@
 #include "common/log.hpp"
 #include "engine/event_bus.hpp"
 #include "engine/sequencer.hpp"
+#include "feed/index_price_feed.hpp"
 #include "market_maker/mm_bot.hpp"
 #include "persistence/sqlite_store.hpp"
 #include "server/bot_tracker.hpp"
@@ -63,9 +64,22 @@ ServerConfig default_config() {
     cfg.backend_url = "http://localhost:3010";
     cfg.db_path = "./engine.db";
     cfg.symbols = {
-        {"BTC-USD", 1, 50000.0},
-        {"ETH-USD", 2, 3000.0},
-        {"LTC-USD", 3, 100.0},
+        // Tradeable markets only — driven by the backend /index-prices feed.
+        // Seeds are recent real values; refreshed to live within seconds.
+        // Cash indices (NIKKEI/HSI/KOSPI/STOXX50) are NOT tradeable and have no
+        // book; they're shown read-only in the dashboard's Indices panel.
+        // Index futures (CME, ~24h):
+        {"ES",   1, 7400.0},     // S&P 500
+        {"NKD",  2, 67475.0},    // Nikkei 225
+        {"NQ",   3, 29678.0},    // Nasdaq-100
+        {"YM",   4, 51608.0},    // Dow Jones
+        {"RTY",  5, 2949.0},     // Russell 2000
+        // ETFs:
+        {"SPY",  6, 740.0},      // S&P 500
+        {"EWJ",  7, 92.0},       // Japan / Nikkei
+        {"EWH",  8, 22.0},       // Hong Kong / HSI
+        {"EWY",  9, 197.0},      // Korea / KOSPI
+        {"FEZ", 10, 69.0},       // Euro Stoxx 50
     };
     return cfg;
 }
@@ -233,11 +247,17 @@ int main(int argc, char* argv[]) {
     MarketMakerBot mm(sequencer, bus, registry, cfg.market_maker);
     mm.start();
 
+    // Live index/ETF anchors: polls the backend and nudges the MM's per-symbol
+    // reference price. Cheap localhost HTTP; no-op for symbols with no feed.
+    IndexPriceFeed index_feed(mm, registry, cfg.backend_url, cfg.index_feed_poll_ms);
+    index_feed.start();
+
     LOG_INFO("main: ready. Press Ctrl+C to stop.");
 
     while (g_running.load()) std::this_thread::sleep_for(std::chrono::milliseconds(200));
 
     LOG_INFO("main: shutting down…");
+    index_feed.stop();
     mm.stop();
     ws.stop();
     dispatcher.stop();

@@ -5,6 +5,7 @@ import { useApiKey } from '../hooks/useApiKey';
 import { useEngineStream } from '../hooks/useEngineStream';
 import { useCurrentServer } from '../hooks/useCurrentServer';
 import type { EngineBookMessage, EngineBookDeltaMessage } from '../services/engineStream';
+import { FUTURES_SYMBOLS, ETF_SYMBOLS, DEFAULT_SYMBOL, SYMBOL_LABELS } from './symbols';
 
 const REST_FALLBACK_POLL_MS = 1000;
 
@@ -19,7 +20,7 @@ export const OrderBook: React.FC = () => {
   const [bids, setBids] = useState<Order[]>([]);
   const [asks, setAsks] = useState<Order[]>([]);
   const [filter, setFilter] = useState('');
-  const [symbol, setSymbol] = useState('BTC-USD');
+  const [symbol, setSymbol] = useState<string>(DEFAULT_SYMBOL);
   const [lastUpdate, setLastUpdate] = useState<string>('');
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -208,9 +209,16 @@ export const OrderBook: React.FC = () => {
             value={symbol}
             onChange={(e) => setSymbol(e.target.value)}
           >
-            <option>BTC-USD</option>
-            <option>ETH-USD</option>
-            <option>LTC-USD</option>
+            <optgroup label="Futures">
+              {FUTURES_SYMBOLS.map((s) => (
+                <option key={s} value={s}>{SYMBOL_LABELS[s] ?? s}</option>
+              ))}
+            </optgroup>
+            <optgroup label="ETFs">
+              {ETF_SYMBOLS.map((s) => (
+                <option key={s} value={s}>{SYMBOL_LABELS[s] ?? s}</option>
+              ))}
+            </optgroup>
           </select>
         </div>
       }
@@ -223,9 +231,9 @@ export const OrderBook: React.FC = () => {
             {error}
           </div>
         ) : null}
-        {!isLoading && lastUpdate && (
+        {!isLoading && lastUpdate && Number.isFinite(parseInt(lastUpdate)) && (
           <div className="text-xs text-slate-500 mb-2 px-2">
-            Last update: {new Date(parseInt(lastUpdate) || Date.now()).toLocaleTimeString()}
+            Last update: {new Date(parseInt(lastUpdate)).toLocaleTimeString()}
           </div>
         )}
         <div className="mb-3">

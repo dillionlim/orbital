@@ -4,6 +4,7 @@ import { Trade } from '../types';
 import { useEngineStream } from '../hooks/useEngineStream';
 import { useCurrentServer } from '../hooks/useCurrentServer';
 import type { EngineTradeMessage } from '../services/engineStream';
+import { SYMBOLS } from './symbols';
 
 interface EngineTrade {
   trade_id: number;
@@ -14,7 +15,6 @@ interface EngineTrade {
   ts: number;
 }
 
-const SYMBOLS = ['BTC-USD', 'ETH-USD', 'LTC-USD'];
 const REST_FALLBACK_POLL_MS = 1000;
 const MAX_TRADES = 50;
 

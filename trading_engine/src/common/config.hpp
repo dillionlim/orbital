@@ -17,10 +17,13 @@ struct SymbolConfig {
 
 struct MarketMakerConfig {
     bool enabled = true;
-    double spread_bps = 20.0;   // total spread; each side is half this
-    Quantity size = 10;
-    int refresh_ms = 5000;
+    Quantity size = 10;         // base size at the top level (deeper levels scale up)
+    int refresh_ms = 1000;
     bool track_trades = true;
+    int levels = 8;             // depth levels quoted per side (the fabricated ladder)
+    int churn_depth = 6;        // transient orders cycled near the top for liveness (0 = off)
+    // The book is priced on a per-symbol tick derived from the anchor's
+    // magnitude; the inside (best bid/ask) brackets the real value by one tick.
 };
 
 struct ServerConfig {
@@ -28,6 +31,7 @@ struct ServerConfig {
     std::string backend_url = "http://localhost:3010";
     std::string db_path = "./engine.db";
     int auth_cache_ttl_seconds = 300;
+    int index_feed_poll_ms = 1000;  // how often to pull live index anchors from the backend
 
     std::vector<SymbolConfig> symbols;
     MarketMakerConfig market_maker;

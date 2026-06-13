@@ -82,6 +82,11 @@ export function loadPyodideRuntime(): Promise<PyodideRuntime> {
 }
 
 const WRAPPER_PY = `
+import json
+
+_ACTIONS = ('buy', 'sell', 'hold')
+_TYPES = ('market', 'limit', 'ioc')
+
 class _BacktestStrategy:
     def __init__(self, source: str):
         ns = {}
@@ -107,19 +112,36 @@ class _BacktestStrategy:
         self.state = self.init_fn(self._to_py(params))
 
     def step(self, trade, params):
+        # Returns a JSON string {action, type, limit?} — strings marshal cleanly
+        # across the Pyodide FFI; dicts don't.
         result = self.on_trade_fn(
             self.state, self._to_py(trade), self._to_py(params),
         )
+        return json.dumps(self._order(result))
+
+    @staticmethod
+    def _order(result):
         if result is None:
-            return 'hold'
-        s = str(result).lower()
-        if s in ('buy', 'sell', 'hold'):
-            return s
-        # Allow returning a dict like {'action': 'buy'} for forward compat.
-        if isinstance(result, dict) and 'action' in result:
-            a = str(result['action']).lower()
-            if a in ('buy', 'sell', 'hold'):
-                return a
+            return {'action': 'hold'}
+        if isinstance(result, str):
+            a = result.lower()
+            if a not in _ACTIONS:
+                raise ValueError(f"on_trade must return 'buy'/'sell'/'hold' or an order dict, got {result!r}")
+            return {'action': a}
+        if isinstance(result, dict):
+            a = str(result.get('action', 'hold')).lower()
+            if a not in _ACTIONS:
+                raise ValueError(f"order 'action' must be buy/sell/hold, got {result.get('action')!r}")
+            t = str(result.get('type', 'market')).lower()
+            if t not in _TYPES:
+                raise ValueError(f"order 'type' must be market/limit/ioc, got {result.get('type')!r}")
+            out = {'action': a, 'type': t}
+            if t in ('limit', 'ioc'):
+                lim = result.get('limit')
+                if lim is None:
+                    raise ValueError(f"a '{t}' order requires a numeric 'limit' price")
+                out['limit'] = float(lim)
+            return out
         raise ValueError(f"on_trade returned unexpected value: {result!r}")
 `;
 
@@ -156,13 +178,16 @@ export async function compilePythonStrategy(source: string, displayName = 'Custo
     },
     onTrade(_state, trade: HistoricalTrade, p: BacktestParams): BacktestSignal {
       try {
-        const result = (wrapper as unknown as {
+        const raw = (wrapper as unknown as {
           step: (t: HistoricalTrade, p: BacktestParams) => string;
         }).step(trade, p);
-        if (result === 'buy' || result === 'sell' || result === 'hold') {
-          return { action: result };
-        }
-        return { action: 'hold' };
+        // step() returns JSON {action, type, limit?}.
+        const sig = JSON.parse(raw) as { action?: string; type?: string; limit?: number };
+        const action: BacktestSignal['action'] =
+          sig.action === 'buy' || sig.action === 'sell' ? sig.action : 'hold';
+        const type: BacktestSignal['type'] =
+          sig.type === 'limit' || sig.type === 'ioc' ? sig.type : 'market';
+        return { action, type, limit: sig.limit };
       } catch (e) {
         throw new Error(`on_trade() raised at ts=${trade.ts}: ${e instanceof Error ? e.message : String(e)}`);
       }
@@ -171,36 +196,61 @@ export async function compilePythonStrategy(source: string, displayName = 'Custo
   return strategy as Strategy;
 }
 
-export const EXAMPLE_PY = `# Example: SMA-cross momentum.
-# Buys when price > N-trade SMA × (1 + threshold), sells on the inverse.
+export const EXAMPLE_PY = `# Example: SMA-cross showing the three order types.
 #
-# Parameters (window, threshold_bps) are defined in the dashboard's
-# Parameters editor — your code just reads them out of the params dict.
+# on_trade may return any of:
+#   "buy" / "sell" / "hold"                              -> market order
+#   {"action": "buy",  "type": "market"}                 -> market (explicit)
+#   {"action": "buy",  "type": "limit", "limit": price}  -> rest a limit @ price
+#   {"action": "sell", "type": "ioc",   "limit": price}  -> immediate-or-cancel
+#
+# market = cross the spread now (buy@ask / sell@bid).
+# limit  = rest; fills later when price crosses your limit (filled at the limit).
+# ioc    = fill now if marketable at your limit, else cancel.
+#
+# Params (all numeric, edited below):
+#   window            SMA length in ticks
+#   threshold_bps     how far past the SMA counts as a signal
+#   entry_offset_bps  how far BELOW price to rest the buy limit (passive entry)
+#   exit_mode         0 = market exit, 1 = IOC exit at the current price
 
 def init(params):
     return {"history": []}
 
 def on_trade(state, trade, params):
-    window = int(params.get("window", 10))
+    window = int(params.get("window", 20))
     threshold = params.get("threshold_bps", 5) / 10_000.0
+    entry_off = params.get("entry_offset_bps", 3) / 10_000.0
+    exit_mode = int(params.get("exit_mode", 0))
 
-    state["history"].append(trade["price"])
-    if len(state["history"]) > window:
-        state["history"].pop(0)
-    if len(state["history"]) < window:
+    px = trade["price"]
+    hist = state["history"]
+    hist.append(px)
+    if len(hist) > window:
+        hist.pop(0)
+    if len(hist) < window:
         return "hold"
 
-    sma = sum(state["history"]) / len(state["history"])
-    if trade["price"] > sma * (1 + threshold):
-        return "buy"
-    if trade["price"] < sma * (1 - threshold):
-        return "sell"
+    sma = sum(hist) / len(hist)
+
+    # Uptrend: enter passively with a resting BUY LIMIT just below price.
+    if px > sma * (1 + threshold):
+        return {"action": "buy", "type": "limit", "limit": px * (1 - entry_off)}
+
+    # Downtrend: exit. Market by default, or IOC at the current price.
+    if px < sma * (1 - threshold):
+        if exit_mode == 1:
+            return {"action": "sell", "type": "ioc", "limit": px}
+        return {"action": "sell", "type": "market"}
+
     return "hold"
 `;
 
 // Mirrors EXAMPLE_PY's parameter usage so "Load example" can seed the
 // dashboard's Parameters editor in one click.
 export const EXAMPLE_PARAMS: Array<{ key: string; label: string; value: number }> = [
-  { key: 'window',        label: 'SMA window (ticks)', value: 10 },
-  { key: 'threshold_bps', label: 'Threshold (bps)',    value: 5  },
+  { key: 'window',           label: 'SMA window (ticks)',       value: 20 },
+  { key: 'threshold_bps',    label: 'Threshold (bps)',          value: 5  },
+  { key: 'entry_offset_bps', label: 'Limit entry offset (bps)', value: 3  },
+  { key: 'exit_mode',        label: 'Exit: 0=market 1=IOC',     value: 0  },
 ];
