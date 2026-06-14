@@ -31,8 +31,5 @@ __pycache__/
 *.db-wal
 *.db-shm
 
-# Large generated datasets (parquet L1) — keep local
-data/
-
 # Clerk local state
 .clerk/
