@@ -25,6 +25,7 @@
 #include "server/metrics.hpp"
 #include "server/position_tracker.hpp"
 #include "server/recent_trades.hpp"
+#include "server/user_fills.hpp"
 #include "server/rest_handlers.hpp"
 #include "server/session.hpp"
 #include "server/snapshot_store.hpp"
@@ -133,6 +134,7 @@ int main(int argc, char* argv[]) {
 
     auto snapshots = std::make_shared<SnapshotStore>();
     auto trades_cache = std::make_shared<RecentTradesCache>(256);
+    auto user_fills = std::make_shared<UserFillsCache>(128);
     EventBus bus;
     SessionRegistry sessions;
 
@@ -145,6 +147,22 @@ int main(int argc, char* argv[]) {
         std::visit([&](auto&& e) {
             using T = std::decay_t<decltype(e)>;
             if constexpr (std::is_same_v<T, TradePrint>) trades_cache->push(e);
+        }, ev);
+    });
+
+    // Feed the per-user fills cache so /me/fills can serve a user's own
+    // executions. Skip internal bots (MM/news) — only real users are queried.
+    bus.subscribe([user_fills](const OutboundEvent& ev) {
+        std::visit([&](auto&& e) {
+            using T = std::decay_t<decltype(e)>;
+            if constexpr (std::is_same_v<T, ExecutionReport>) {
+                if (e.kind == ExecutionReport::Kind::Fill && !e.is_internal &&
+                    !e.user_id.empty()) {
+                    user_fills->push(e.user_id,
+                                     UserFill{e.trade_id, e.symbol, e.side,
+                                              e.last_price, e.last_quantity, e.ts});
+                }
+            }
         }, ev);
     });
 
@@ -188,7 +206,7 @@ int main(int argc, char* argv[]) {
     dispatcher.start();
 
     RestRouter rest(cfg.port, metrics, auth, registry, snapshots, trades_cache,
-                    bot_tracker, store, sessions, dispatcher);
+                    user_fills, bot_tracker, store, sessions, dispatcher);
     WsServer ws(cfg.port, rest, dispatcher, auth, sessions, metrics);
     if (!ws.start()) {
         LOG_ERROR("main: WS server start failed");

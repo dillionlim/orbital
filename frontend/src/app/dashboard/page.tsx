@@ -3,6 +3,8 @@
 import { useUser } from "@clerk/nextjs";
 import { Header } from "@/src/dashboard/Header";
 import { GlobalTradeTicker } from "@/src/dashboard/GlobalTradeTicker";
+import { BigTrades } from "@/src/dashboard/BigTrades";
+import { MyTrades } from "@/src/dashboard/MyTrades";
 import { OrderBook } from "@/src/dashboard/OrderBook";
 import { IndicesPanel } from "@/src/dashboard/IndicesPanel";
 import { ReturnsChart } from "@/src/dashboard/ReturnsChart";
@@ -47,12 +49,19 @@ export default function Dashboard() {
             <PnLCharts />
         </div>
 
-        {/* Bottom Row: Ticker & Backtester */}
-        <div className="col-span-1 md:col-span-5">
+        {/* Trades row: global ticker · big trades · my trades */}
+        <div className="col-span-1 md:col-span-4">
             <GlobalTradeTicker />
         </div>
+        <div className="col-span-1 md:col-span-4">
+            <BigTrades />
+        </div>
+        <div className="col-span-1 md:col-span-4">
+            <MyTrades />
+        </div>
 
-        <div className="col-span-1 md:col-span-7">
+        {/* Backtester (full width) */}
+        <div className="col-span-1 md:col-span-12">
            <Backtester />
         </div>
       </main>
