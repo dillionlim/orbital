@@ -4,8 +4,7 @@ import React from 'react';
 import { TrendingUp, Shield, Zap, ArrowRight } from 'lucide-react';
 import { SignInButton, useUser } from '@clerk/nextjs';
 import Link from 'next/link';
-
-import BubblesIcon from '../components/BubblesIcon';
+import BubblesIcon from '../ui/BubblesIcon';
 
 export default function LandingPage() {
   const { isSignedIn } = useUser();
@@ -17,21 +16,27 @@ export default function LandingPage() {
            <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
              <BubblesIcon className="text-white w-5 h-5" />
            </div>
-           <span className="font-bold text-xl tracking-tight text-white">Bubbles</span>
+           <span className="font-bold text-xl tracking-tight text-transparent bg-clip-text bg-gradient-to-br from-sky-300 via-blue-500 to-indigo-600">Bubbles</span>
         </div>
-        {isSignedIn ? (
-          <Link href="/dashboard" className="text-sm font-medium hover:text-white transition-colors">
-             Dashboard
+        <div className="flex items-center gap-6">
+          <Link href="/config-generator" className="text-sm font-medium text-slate-400 hover:text-white transition-colors">
+            Config Generator
           </Link>
-        ) : (
-          <SignInButton mode="modal">
-            <button 
-              className="text-sm font-medium hover:text-white transition-colors"
-            >
-              Login
-            </button>
-          </SignInButton>
-        )}
+          {isSignedIn ? (
+            <Link href="/dashboard" className="text-sm font-medium hover:text-white transition-colors">
+               Dashboard
+            </Link>
+          ) : (
+            <SignInButton mode="modal">
+              <button
+                type="button"
+                className="text-sm font-medium hover:text-white transition-colors"
+              >
+                Login
+              </button>
+            </SignInButton>
+          )}
+        </div>
       </nav>
 
       <main className="max-w-6xl mx-auto px-6 pt-20 pb-16">
@@ -53,7 +58,8 @@ export default function LandingPage() {
              </Link>
           ) : (
             <SignInButton mode="modal">
-              <button 
+              <button
+                type="button"
                 className="group bg-blue-600 hover:bg-blue-500 text-white px-8 py-3 rounded-full font-semibold transition-all flex items-center gap-2 mx-auto shadow-lg shadow-blue-900/20"
               >
                 Get Started
@@ -89,7 +95,7 @@ export default function LandingPage() {
       </main>
 
       <footer className="border-t border-slate-800 py-8 text-center text-slate-500">
-        &copy; Bubbles
+        &copy; 2025 Bubbles. Built for algorithmic traders.
       </footer>
     </div>
   );
