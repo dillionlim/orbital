@@ -150,11 +150,19 @@ GeminiResult GeminiClient::classify(const std::string& headline,
     // Build the request body. responseSchema constrains the model to a
     // structured JSON output (no need to parse markdown or strip prose).
     const std::string prompt =
-        "You are a market analyst classifying news for crypto trading.\n"
-        "Symbols available: " + symbols_csv + "\n"
-        "Pick the single symbol most affected (or NONE if no clear connection),\n"
-        "decide direction (buy = positive, sell = negative, hold = unclear),\n"
-        "and a confidence 0..1.\n\n"
+        "You are an equity-market analyst mapping financial news to tradeable "
+        "index futures and regional ETFs.\n\n"
+        "Instruments (NAME — what it tracks):\n" + symbols_csv + "\n"
+        "Rules:\n"
+        "- Pick the SINGLE instrument whose underlying market is most affected by "
+        "the news; return NONE if the news has no clear link to any of them.\n"
+        "- Match by region/economy and sector: US macro, Fed, or big US tech/mega-cap "
+        "news -> US indices (ES/NQ/YM/RTY) or SPY; Japan -> NKD/EWJ; Hong Kong or China "
+        "-> EWH; South Korea -> EWY; Europe/eurozone -> FEZ.\n"
+        "- direction: buy = bullish for that market, sell = bearish, hold = unclear.\n"
+        "- confidence 0..1 reflects how directly and strongly the news moves that "
+        "market; use low confidence (<0.5) for vague or tangential headlines.\n"
+        "- Crypto-only, single-small-cap, or off-topic headlines -> NONE.\n\n"
         "Headline: " + headline + "\n"
         "Summary: " + summary;
 

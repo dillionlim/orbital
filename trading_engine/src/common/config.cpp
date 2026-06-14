@@ -88,6 +88,8 @@ ServerConfig load_config(const std::string& path) {
         sc.name = v["name"].GetString();
         sc.id = v["id"].GetUint64();
         sc.mid = v["mid"].GetDouble();
+        if (v.HasMember("desc") && v["desc"].IsString())
+            sc.desc = v["desc"].GetString();
 
         // Position-cap parsing.
         //   `max_position` is shorthand: it sets both sides symmetrically.

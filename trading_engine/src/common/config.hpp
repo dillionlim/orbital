@@ -19,6 +19,8 @@ struct SymbolConfig {
     std::string name;     // wire name, e.g. "BTC-USD"
     SymbolId id;          // internal id
     Price mid;             // initial mid for the market maker
+    std::string desc;      // human description (e.g. "S&P 500 E-mini future") —
+                           // fed to the news analyzer so it maps headlines accurately
 
     // Per-symbol position caps applied to external users (in-process MM is
     // exempt). max_long bounds (position + open_buy_qty), max_short bounds
