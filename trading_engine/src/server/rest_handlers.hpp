@@ -10,6 +10,7 @@
 #include "server/dispatcher.hpp"
 #include "server/metrics.hpp"
 #include "server/recent_trades.hpp"
+#include "server/user_fills.hpp"
 #include "server/session.hpp"
 #include "server/snapshot_store.hpp"
 
@@ -24,12 +25,14 @@ public:
                std::shared_ptr<SymbolRegistry> registry,
                std::shared_ptr<SnapshotStore> snapshots,
                std::shared_ptr<RecentTradesCache> trades,
+               std::shared_ptr<UserFillsCache> user_fills,
                std::shared_ptr<BotTracker> bots,
                SqliteStore& store, SessionRegistry& sessions,
                Dispatcher& dispatcher)
         : port_(port), metrics_(metrics), auth_(auth),
           registry_(std::move(registry)), snapshots_(std::move(snapshots)),
-          trades_(std::move(trades)), bots_(std::move(bots)), store_(store),
+          trades_(std::move(trades)), user_fills_(std::move(user_fills)),
+          bots_(std::move(bots)), store_(store),
           sessions_(sessions), dispatcher_(dispatcher) {}
 
     // Returns the full HTTP response text. `request` is the raw request (headers+body).
@@ -43,6 +46,7 @@ private:
     [[nodiscard]] std::string handle_historical_trades(std::string_view path);
     [[nodiscard]] std::string handle_bots(std::string_view path);
     [[nodiscard]] std::string handle_me(std::string_view request);
+    [[nodiscard]] std::string handle_me_fills(std::string_view path, std::string_view request);
     // pause==true → POST /bots/:client_id/pause; false → /resume.
     [[nodiscard]] std::string handle_bot_pause(std::string_view client_id,
                                                std::string_view request, bool pause);
@@ -53,6 +57,7 @@ private:
     std::shared_ptr<SymbolRegistry> registry_;
     std::shared_ptr<SnapshotStore> snapshots_;
     std::shared_ptr<RecentTradesCache> trades_;
+    std::shared_ptr<UserFillsCache> user_fills_;
     std::shared_ptr<BotTracker> bots_;
     SqliteStore& store_;
     SessionRegistry& sessions_;

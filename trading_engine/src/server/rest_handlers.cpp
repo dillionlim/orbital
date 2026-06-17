@@ -135,6 +135,10 @@ std::string RestRouter::handle(std::string_view request) {
         if (client_id.empty()) return http_response(400, "{\"error\":\"missing client_id\"}", "application/json");
         return handle_bot_pause(client_id, request, is_pause);
     }
+    // /me/fills must match before the plain /me below.
+    if (path.rfind("/me/fills", 0) == 0) {
+        return handle_me_fills(path, request);
+    }
     if (path == "/me" || path.rfind("/me?", 0) == 0) {
         return handle_me(request);
     }
@@ -331,6 +335,44 @@ std::string RestRouter::handle_me(std::string_view request) {
     }
     std::ostringstream oss;
     oss << "{\"user_id\":\"" << res.user_id << "\"}";
+    return http_response(200, oss.str(), "application/json");
+}
+
+// GET /me/fills?limit=N — the caller's own executions (most-recent-first),
+// resolved from their API key. Same shape as /trades plus the resting side.
+std::string RestRouter::handle_me_fills(std::string_view path, std::string_view request) {
+    std::string apiKey = extractApiKeyFromHttp(request);
+    if (apiKey.empty()) {
+        return http_response(401, "{\"error\":\"missing api key\"}", "application/json");
+    }
+    auto res = auth_.validate(apiKey);
+    if (!res.valid) {
+        return http_response(401, "{\"error\":\"invalid api key\"}", "application/json");
+    }
+
+    std::size_t limit = 50;
+    std::string limit_s = parse_query_param(path, "limit");
+    if (!limit_s.empty()) {
+        try {
+            limit = std::min<std::size_t>(200, std::max<std::size_t>(1, std::stoul(limit_s)));
+        } catch (...) {}
+    }
+
+    const auto fills = user_fills_->get(res.user_id, limit);
+    std::ostringstream oss;
+    oss << "{\"user_id\":\"" << res.user_id << "\",\"fills\":[";
+    for (std::size_t i = 0; i < fills.size(); ++i) {
+        const auto& f = fills[i];
+        if (i) oss << ",";
+        auto name = registry_->name_for(f.symbol);
+        oss << "{\"trade_id\":" << f.trade_id
+            << ",\"symbol\":\"" << (name ? *name : std::string()) << "\""
+            << ",\"price\":" << f.price
+            << ",\"quantity\":" << f.quantity
+            << ",\"side\":\"" << side_name(f.side) << "\""
+            << ",\"ts\":" << f.ts << "}";
+    }
+    oss << "]}";
     return http_response(200, oss.str(), "application/json");
 }
 

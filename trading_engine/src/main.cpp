@@ -13,6 +13,7 @@
 #include "common/log.hpp"
 #include "engine/event_bus.hpp"
 #include "engine/sequencer.hpp"
+#include "feed/index_price_feed.hpp"
 #include "market_maker/mm_bot.hpp"
 #include "news_bot/gemini_client.hpp"
 #include "news_bot/news_analyzer.hpp"
@@ -24,6 +25,7 @@
 #include "server/metrics.hpp"
 #include "server/position_tracker.hpp"
 #include "server/recent_trades.hpp"
+#include "server/user_fills.hpp"
 #include "server/rest_handlers.hpp"
 #include "server/session.hpp"
 #include "server/snapshot_store.hpp"
@@ -59,9 +61,22 @@ ServerConfig default_config() {
     cfg.backend_url = "http://localhost:3010";
     cfg.db_path = "./engine.db";
     cfg.symbols = {
-        {"BTC-USD", 1, 50000.0},
-        {"ETH-USD", 2, 3000.0},
-        {"LTC-USD", 3, 100.0},
+        // Tradeable markets only — driven by the backend /index-prices feed.
+        // Seeds are recent real values; refreshed to live within seconds.
+        // Cash indices (NIKKEI/HSI/KOSPI/STOXX50) are NOT tradeable and have no
+        // book; they're shown read-only in the dashboard's Indices panel.
+        // Index futures (CME, ~24h):
+        {"ES",   1, 7400.0},     // S&P 500
+        {"NKD",  2, 67475.0},    // Nikkei 225
+        {"NQ",   3, 29678.0},    // Nasdaq-100
+        {"YM",   4, 51608.0},    // Dow Jones
+        {"RTY",  5, 2949.0},     // Russell 2000
+        // ETFs:
+        {"SPY",  6, 740.0},      // S&P 500
+        {"EWJ",  7, 92.0},       // Japan / Nikkei
+        {"EWH",  8, 22.0},       // Hong Kong / HSI
+        {"EWY",  9, 197.0},      // Korea / KOSPI
+        {"FEZ", 10, 69.0},       // Euro Stoxx 50
     };
     return cfg;
 }
@@ -119,6 +134,7 @@ int main(int argc, char* argv[]) {
 
     auto snapshots = std::make_shared<SnapshotStore>();
     auto trades_cache = std::make_shared<RecentTradesCache>(256);
+    auto user_fills = std::make_shared<UserFillsCache>(128);
     EventBus bus;
     SessionRegistry sessions;
 
@@ -131,6 +147,22 @@ int main(int argc, char* argv[]) {
         std::visit([&](auto&& e) {
             using T = std::decay_t<decltype(e)>;
             if constexpr (std::is_same_v<T, TradePrint>) trades_cache->push(e);
+        }, ev);
+    });
+
+    // Feed the per-user fills cache so /me/fills can serve a user's own
+    // executions. Skip internal bots (MM/news) — only real users are queried.
+    bus.subscribe([user_fills](const OutboundEvent& ev) {
+        std::visit([&](auto&& e) {
+            using T = std::decay_t<decltype(e)>;
+            if constexpr (std::is_same_v<T, ExecutionReport>) {
+                if (e.kind == ExecutionReport::Kind::Fill && !e.is_internal &&
+                    !e.user_id.empty()) {
+                    user_fills->push(e.user_id,
+                                     UserFill{e.trade_id, e.symbol, e.side,
+                                              e.last_price, e.last_quantity, e.ts});
+                }
+            }
         }, ev);
     });
 
@@ -174,7 +206,7 @@ int main(int argc, char* argv[]) {
     dispatcher.start();
 
     RestRouter rest(cfg.port, metrics, auth, registry, snapshots, trades_cache,
-                    bot_tracker, store, sessions, dispatcher);
+                    user_fills, bot_tracker, store, sessions, dispatcher);
     WsServer ws(cfg.port, rest, dispatcher, auth, sessions, metrics);
     if (!ws.start()) {
         LOG_ERROR("main: WS server start failed");
@@ -183,6 +215,11 @@ int main(int argc, char* argv[]) {
 
     MarketMakerBot mm(sequencer, bus, registry, cfg.market_maker);
     mm.start();
+
+    // Live index/ETF anchors: polls the backend and nudges the MM's per-symbol
+    // reference price. Cheap localhost HTTP; no-op for symbols with no feed.
+    IndexPriceFeed index_feed(mm, registry, cfg.backend_url, cfg.index_feed_poll_ms);
+    index_feed.start();
 
     // News-analyzer + per-persona news bots. Whole subsystem is opt-in:
     // skipped entirely if no bot config is enabled OR if GEMINI_API_KEY is
@@ -258,6 +295,7 @@ int main(int argc, char* argv[]) {
     while (g_running.load()) std::this_thread::sleep_for(std::chrono::milliseconds(200));
 
     LOG_INFO("main: shutting down…");
+    index_feed.stop();
     if (news_analyzer) news_analyzer->stop();
     for (auto& nb : news_bots) nb->stop();   // joins noise threads cleanly
     news_bots.clear();

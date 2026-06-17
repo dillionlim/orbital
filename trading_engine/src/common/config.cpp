@@ -69,6 +69,8 @@ ServerConfig load_config(const std::string& path) {
             cfg.db_path = s["db_path"].GetString();
         if (s.HasMember("auth_cache_ttl_seconds") && s["auth_cache_ttl_seconds"].IsInt())
             cfg.auth_cache_ttl_seconds = s["auth_cache_ttl_seconds"].GetInt();
+        if (s.HasMember("index_feed_poll_ms") && s["index_feed_poll_ms"].IsInt())
+            cfg.index_feed_poll_ms = s["index_feed_poll_ms"].GetInt();
     }
 
     if (!doc.HasMember("symbols") || !doc["symbols"].IsArray()) {
@@ -86,6 +88,8 @@ ServerConfig load_config(const std::string& path) {
         sc.name = v["name"].GetString();
         sc.id = v["id"].GetUint64();
         sc.mid = v["mid"].GetDouble();
+        if (v.HasMember("desc") && v["desc"].IsString())
+            sc.desc = v["desc"].GetString();
 
         // Position-cap parsing.
         //   `max_position` is shorthand: it sets both sides symmetrically.
@@ -114,13 +118,15 @@ ServerConfig load_config(const std::string& path) {
         const auto& m = doc["market_maker"];
         auto& mm = cfg.market_maker;
         if (m.HasMember("enabled") && m["enabled"].IsBool()) mm.enabled = m["enabled"].GetBool();
-        if (m.HasMember("spread_bps") && m["spread_bps"].IsNumber())
-            mm.spread_bps = m["spread_bps"].GetDouble();
         if (m.HasMember("size") && m["size"].IsUint64()) mm.size = m["size"].GetUint64();
         if (m.HasMember("refresh_ms") && m["refresh_ms"].IsInt())
             mm.refresh_ms = m["refresh_ms"].GetInt();
         if (m.HasMember("track_trades") && m["track_trades"].IsBool())
             mm.track_trades = m["track_trades"].GetBool();
+        if (m.HasMember("levels") && m["levels"].IsInt())
+            mm.levels = m["levels"].GetInt();
+        if (m.HasMember("churn_depth") && m["churn_depth"].IsInt())
+            mm.churn_depth = m["churn_depth"].GetInt();
         if (m.HasMember("requote_drift_bps") && m["requote_drift_bps"].IsInt())
             mm.requote_drift_bps = m["requote_drift_bps"].GetInt();
     }
