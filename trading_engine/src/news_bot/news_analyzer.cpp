@@ -54,12 +54,14 @@ NewsAnalyzer::NewsAnalyzer(std::string backend_url,
     backend_host_ = h;
     backend_port_ = p;
 
+    // Build a descriptive catalog (one symbol per line: "NAME — what it is")
+    // so the classifier can map a headline to the right instrument. Falls back
+    // to a bare name when a symbol has no description configured.
     std::ostringstream oss;
-    bool first = true;
     for (const auto& s : registry_->symbols()) {
-        if (!first) oss << ",";
         oss << s.name;
-        first = false;
+        if (!s.desc.empty()) oss << " — " << s.desc;
+        oss << "\n";
     }
     symbols_csv_ = oss.str();
 }

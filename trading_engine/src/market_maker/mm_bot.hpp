@@ -1,11 +1,13 @@
 #pragma once
 #include <atomic>
-#include <chrono>
+#include <deque>
 #include <memory>
 #include <mutex>
+#include <random>
 #include <thread>
 #include <unordered_map>
 #include <unordered_set>
+#include <vector>
 
 #include "common/config.hpp"
 #include "engine/event_bus.hpp"
@@ -13,10 +15,12 @@
 
 namespace TradingSystem {
 
-// In-process market maker. Posts symmetric Buy/Sell quotes around a per-symbol
-// mid price; re-posts on fills; periodically refreshes if there's no activity.
-// Wired through Sequencer (NOT through the network) so it traffics in the same
-// OrderId namespace as real bots.
+// In-process market maker. Posts a multi-level Buy/Sell ladder around a
+// per-symbol anchor price; re-posts on fills; periodically refreshes; and
+// repaints the ladder when the anchor moves. The anchor can be driven live by
+// an external feed via update_reference_price() — real top-of-book price with a
+// fabricated depth ladder underneath. Wired through Sequencer (NOT through the
+// network) so it traffics in the same OrderId namespace as real bots.
 class MarketMakerBot {
 public:
     MarketMakerBot(Sequencer& seq, EventBus& bus,
@@ -27,32 +31,28 @@ public:
     void start();
     void stop();
 
+    // Set a symbol's reference (anchor) price from an external source. The
+    // resting ladder is repainted around it on the next refresh tick.
+    void update_reference_price(SymbolId symbol, Price price);
+
 private:
     struct State {
         SymbolId symbol = 0;
         Price mid = 0;
         Price last_trade_price = 0;
-        // The price the *currently resting* quotes are anchored to. We
-        // compare last_trade_price against this to decide when external
-        // price action has drifted far enough to make our quotes stale.
-        Price quote_anchor = 0;
-        OrderId bid_id = 0;
-        OrderId ask_id = 0;
-        // Cooldown timestamp on event-driven requotes so a burst of
-        // trades can't trigger a cancel-and-replace on every print.
-        std::chrono::steady_clock::time_point last_requote_at{};
+        Price quoted_anchor = 0;            // anchor the resting ladder is built on
+        std::vector<OrderId> bid_ids;
+        std::vector<OrderId> ask_ids;
+        std::deque<OrderId> churn_ids;      // transient orders cycled for liveness
     };
 
-    void seed_quote_locked(State& st);
-    void post_side(State& st, OrderSide side);
-    void cancel_side_locked(State& st, OrderSide side);
+    Price anchor_of(const State& st) const;
     void requote_locked(State& st);
+    void cancel_side_locked(State& st, OrderSide side);
+    void post_ladder_locked(State& st, OrderSide side);
+    void churn_step_locked(State& st);
     void on_event(const OutboundEvent& ev);
     void refresh_loop();
-
-    // Resolved at start() from cfg_.requote_drift_bps (or its default).
-    int effective_drift_bps_ = 0;
-    static constexpr int kRequoteCooldownMs = 250;
 
     Sequencer& seq_;
     EventBus& bus_;
@@ -63,6 +63,7 @@ private:
     std::mutex mu_;
     std::unordered_map<SymbolId, State> states_;
     std::unordered_set<OrderId> our_orders_;
+    std::mt19937 rng_{0x9E3779B9};         // size jitter; fixed seed = reproducible
     EventBus::SubscriberId sub_id_ = 0;
 
     std::atomic<bool> running_{false};
