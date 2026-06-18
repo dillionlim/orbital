@@ -3,34 +3,31 @@
     "port": 9090,
     "backend_url": "http://localhost:3010",
     "db_path": "./engine.db",
-    "auth_cache_ttl_seconds": 300
+    "auth_cache_ttl_seconds": 300,
+    "index_feed_poll_ms": 1000
   },
   "symbols": [
-    {
-      "name": "BTC-USD",
-      "id": 1,
-      "mid": 50000
-    },
-    {
-      "name": "ETH-USD",
-      "id": 2,
-      "mid": 3000
-    },
-    {
-      "name": "LTC-USD",
-      "id": 3,
-      "mid": 100
-    }
+    { "name": "ES",  "id": 1,  "mid": 7400.0,  "desc": "S&P 500 E-mini future (US large-cap)" },
+    { "name": "NKD", "id": 2,  "mid": 67475.0, "desc": "Nikkei 225 future (Japan)" },
+    { "name": "NQ",  "id": 3,  "mid": 29678.0, "desc": "Nasdaq-100 future (US tech / mega-cap)" },
+    { "name": "YM",  "id": 4,  "mid": 51608.0, "desc": "Dow Jones future (US blue-chip)" },
+    { "name": "RTY", "id": 5,  "mid": 2949.0,  "desc": "Russell 2000 future (US small-cap)" },
+    { "name": "SPY", "id": 6,  "mid": 740.0,   "desc": "S&P 500 ETF (US large-cap)" },
+    { "name": "EWJ", "id": 7,  "mid": 92.0,    "desc": "iShares Japan ETF" },
+    { "name": "EWH", "id": 8,  "mid": 22.0,    "desc": "iShares Hong Kong ETF (HK / China)" },
+    { "name": "EWY", "id": 9,  "mid": 197.0,   "desc": "iShares South Korea ETF" },
+    { "name": "FEZ", "id": 10, "mid": 69.0,    "desc": "Euro Stoxx 50 ETF (eurozone)" }
   ],
   "market_maker": {
     "enabled": true,
-    "spread_bps": 20,
     "size": 10,
-    "refresh_ms": 5000,
-    "track_trades": true
+    "refresh_ms": 1000,
+    "track_trades": true,
+    "levels": 8
   },
   "news": {
-    "poll_seconds": 30,
+    "poll_seconds": 15,
+    "fetch_limit": 200,
     "gemini_model": "gemini-2.5-flash",
     "gemini_api_key": "",
     "bots": [
@@ -40,7 +37,9 @@
         "size_per_signal": 5,
         "confidence_threshold": 0.6,
         "size_jitter_pct": 25,
-        "price_offset_jitter_bps": 15
+        "price_offset_jitter_bps": 15,
+        "noise_interval_seconds": 10,
+        "signal_delay_ms": 4000
       },
       {
         "count": 50,
@@ -48,7 +47,9 @@
         "size_per_signal": 3,
         "confidence_threshold": 0.7,
         "size_jitter_pct": 25,
-        "price_offset_jitter_bps": 15
+        "price_offset_jitter_bps": 15,
+        "noise_interval_seconds": 12,
+        "signal_delay_ms": 4000
       },
       {
         "count": 1000,
@@ -56,7 +57,9 @@
         "size_per_signal": 4,
         "confidence_threshold": 0.65,
         "size_jitter_pct": 30,
-        "price_offset_jitter_bps": 8
+        "price_offset_jitter_bps": 8,
+        "noise_interval_seconds": 20,
+        "signal_delay_ms": 2500
       }
     ]
   }
