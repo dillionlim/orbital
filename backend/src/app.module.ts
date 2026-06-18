@@ -8,6 +8,7 @@ import { ApiKeyModule } from './api-keys/api-key.module';
 import { TradingModule } from './trading/trading.module';
 import { UsersModule } from './users/users.module';
 import { NewsModule } from './news/news.module';
+import { IndexPricesModule } from './index-prices/index-prices.module';
 
 @Module({
   imports: [
@@ -16,7 +17,8 @@ import { NewsModule } from './news/news.module';
     ApiKeyModule,
     TradingModule,
     UsersModule,
-    NewsModule
+    NewsModule,
+    IndexPricesModule
   ],
   controllers: [AppController],
   providers: [AppService, PrismaService],

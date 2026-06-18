@@ -30,6 +30,8 @@
     "@prisma/adapter-pg": "^7.2.0",
     "@prisma/client": "^7.2.0",
     "@types/passport-jwt": "^4.0.1",
+    "hyparquet": "^1.26.0",
+    "hyparquet-compressors": "^1.1.1",
     "jwks-rsa": "^3.2.0",
     "passport": "^0.7.0",
     "passport-auth0": "^1.4.5",
@@ -66,7 +68,7 @@
     "typescript": "^5.7.3",
     "typescript-eslint": "^8.20.0"
   },
-    "jest": {
+  "jest": {
     "moduleFileExtensions": [
       "js",
       "json",
