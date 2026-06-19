@@ -23,6 +23,10 @@ body {
   font-family: Arial, Helvetica, sans-serif;
 }
 
+nextjs-portal {
+  display: none !important;
+}
+
 /* Used by code blocks (e.g. JSON preview on /config-generator). The body
    `font-family: Arial` rule above inherits everywhere and beats Tailwind's
    `font-mono` utility (the Geist-Mono CSS var doesn't reliably resolve

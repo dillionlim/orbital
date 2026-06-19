@@ -1,6 +1,6 @@
 'use client';
 
-// Orbital trading-engine API docs. Hosted by the frontend (was previously
+// Bubbles trading-engine API docs. Hosted by the frontend (was previously
 // embedded into the engine binary at /docs and shipped as static HTML
 // under public/engine-docs). Rewritten as TSX so it shares the dashboard
 // shell, picks up Tailwind theming, and gets client-side scroll-spy +
@@ -795,7 +795,7 @@ asyncio.run(main())`}</CodeBlock>
           </Section>
 
           <footer className="mt-12 pt-6 border-t border-slate-800 text-xs text-slate-500">
-            Orbital Trading Engine · NUS Orbital
+            Bubbles · NUS Orbital
           </footer>
         </main>
       </div>

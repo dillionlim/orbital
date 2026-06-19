@@ -20,7 +20,7 @@ export const OrderBook: React.FC = () => {
   const [bids, setBids] = useState<Order[]>([]);
   const [asks, setAsks] = useState<Order[]>([]);
   const [filter, setFilter] = useState('');
-  const [symbol, setSymbol] = useState('BTC-USD');
+  const [symbol, setSymbol] = useState<string>('');
   const [lastUpdate, setLastUpdate] = useState<string>('');
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -232,9 +232,9 @@ export const OrderBook: React.FC = () => {
             {error}
           </div>
         ) : null}
-        {!isLoading && lastUpdate && (
+        {!isLoading && lastUpdate && Number.isFinite(parseInt(lastUpdate)) && (
           <div className="text-xs text-slate-500 mb-2 px-2">
-            Last update: {new Date(parseInt(lastUpdate) || Date.now()).toLocaleTimeString()}
+            Last update: {new Date(parseInt(lastUpdate)).toLocaleTimeString()}
           </div>
         )}
         <div className="mb-3">
