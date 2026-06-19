@@ -1,0 +1,316 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Bubbles Trading Engine — API Reference</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <div class="brand">
+      <span class="logo">🫧</span>
+      <div>
+        <h1>Trading Engine</h1>
+        <div class="sub">API Reference</div>
+      </div>
+    </div>
+    <nav class="nav">
+      <div class="group">Introduction</div>
+      <a href="#overview">Overview</a>
+      <a href="#markets">Markets</a>
+      <a href="#auth">Authentication</a>
+      <div class="group">REST API</div>
+      <a href="#rest-health">Health &amp; metrics</a>
+      <a href="#rest-orderbook">Order book</a>
+      <a href="#rest-trades">Trades</a>
+      <a href="#rest-bots">Bots</a>
+      <div class="group">WebSocket</div>
+      <a href="#ws-connect">Connecting</a>
+      <a href="#ws-inbound">Client → Server</a>
+      <a href="#ws-outbound">Server → Client</a>
+      <a href="#ws-flow">Example session</a>
+    </nav>
+  </aside>
+
+  <main class="content">
+    <section id="overview">
+      <h2>Overview</h2>
+      <p class="lede">Bubbles is a self-hostable algorithmic trading sandbox built around a price–time-priority matching engine written in C++. Bots connect over WebSocket, place orders that match against a built-in market maker or each other, and stream the live order book, trades, and fills.</p>
+      <p>The engine exposes two interfaces: a <strong>REST API</strong> for market-data snapshots, bot management, and health, and a <strong>WebSocket API</strong> for real-time streaming and order entry. Examples below assume the engine is running on <code>localhost:9090</code>.</p>
+      <div class="callout">All timestamps are Unix epoch <strong>milliseconds</strong>. Prices are <code>double</code>, quantities and IDs are unsigned integers. Sides are <code>"Buy"</code>/<code>"Sell"</code> and are case-insensitive on input.</div>
+    </section>
+
+    <section id="markets">
+      <h2>Markets</h2>
+      <p>Each market's top of book is anchored to a real-world reference price; the market maker fabricates the depth ladder beneath it. Index anchors come from Yahoo Finance (real-time); ETF anchors come from Massive (~15-min delayed).</p>
+      <h3>Indices</h3>
+      <table>
+        <thead><tr><th>Symbol</th><th>Instrument</th><th>Tick</th></tr></thead>
+        <tbody>
+          <tr><td class="t-mono">NIKKEI</td><td>Nikkei 225</td><td class="t-mono">1.0</td></tr>
+          <tr><td class="t-mono">HSI</td><td>Hang Seng</td><td class="t-mono">1.0</td></tr>
+          <tr><td class="t-mono">KOSPI</td><td>KOSPI Composite</td><td class="t-mono">0.1</td></tr>
+          <tr><td class="t-mono">STOXX50</td><td>Euro Stoxx 50</td><td class="t-mono">0.1</td></tr>
+          <tr><td class="t-mono">ES</td><td>S&amp;P 500 (E-mini ref)</td><td class="t-mono">0.1</td></tr>
+        </tbody>
+      </table>
+      <h3>ETFs</h3>
+      <table>
+        <thead><tr><th>Symbol</th><th>Tracks</th><th>Tick</th></tr></thead>
+        <tbody>
+          <tr><td class="t-mono">SPY</td><td>S&amp;P 500</td><td class="t-mono">0.01</td></tr>
+          <tr><td class="t-mono">EWJ</td><td>Japan / Nikkei</td><td class="t-mono">0.01</td></tr>
+          <tr><td class="t-mono">EWH</td><td>Hong Kong / HSI</td><td class="t-mono">0.01</td></tr>
+          <tr><td class="t-mono">EWY</td><td>Korea / KOSPI</td><td class="t-mono">0.01</td></tr>
+          <tr><td class="t-mono">FEZ</td><td>Euro Stoxx 50</td><td class="t-mono">0.01</td></tr>
+        </tbody>
+      </table>
+      <p>Tick size is derived per symbol from the anchor's magnitude (~4 significant figures, floored at 0.01). The best bid/ask bracket the real value by one tick.</p>
+    </section>
+
+    <section id="auth">
+      <h2>Authentication</h2>
+      <p>Order entry and bot management require a per-user <strong>API key</strong>. Issue one from the dashboard; the engine validates it against the backend and caches the result.</p>
+      <table>
+        <thead><tr><th>Property</th><th>Value</th></tr></thead>
+        <tbody>
+          <tr><td>Format</td><td class="t-mono">^sk_live_[a-f0-9]{32}$</td></tr>
+          <tr><td>Example</td><td class="t-mono">sk_live_a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6</td></tr>
+        </tbody>
+      </table>
+      <p>A key may be supplied three ways (checked in order):</p>
+      <pre><code>Authorization: Bearer sk_live_...
+Api-Key: sk_live_...
+?api_key=sk_live_...        # query parameter</code></pre>
+      <div class="callout">Market data (order book, trades, health) is <strong>public</strong>. Only order entry, the WebSocket upgrade, and bot pause/resume require a key.</div>
+    </section>
+
+    <!-- ===================== REST ===================== -->
+    <section id="rest-health">
+      <h2>REST · Health &amp; metrics</h2>
+
+      <div class="endpoint">
+        <div class="head"><span class="method get">GET</span><span class="path">/health</span><span class="auth-tag no">public</span></div>
+        <p class="desc">Liveness probe.</p>
+        <pre><code>{ "status": "healthy" }</code></pre>
+      </div>
+
+      <div class="endpoint">
+        <div class="head"><span class="method get">GET</span><span class="path">/status</span><span class="auth-tag no">public</span></div>
+        <p class="desc">Server uptime, connection counts, and order statistics.</p>
+        <pre><code>{
+  "port": 9090,
+  "uptime_ms": 12345,
+  "connections": { "ws_active": 5, "ws_total": 120 },
+  "orders": { "accepted": 5432, "rejected": 12, "fills": 2100 }
+}</code></pre>
+      </div>
+
+      <div class="endpoint">
+        <div class="head"><span class="method get">GET</span><span class="path">/metrics</span><span class="auth-tag no">public</span></div>
+        <p class="desc">Raw counters for scraping.</p>
+      </div>
+    </section>
+
+    <section id="rest-orderbook">
+      <h2>REST · Order book</h2>
+      <div class="endpoint">
+        <div class="head"><span class="method get">GET</span><span class="path">/orderbook?symbol={sym}</span><span class="auth-tag opt">optional auth</span></div>
+        <p class="desc">L2 snapshot for one symbol. Aggregated levels, best price first. Unknown symbols return empty arrays.</p>
+        <h3>Query parameters</h3>
+        <table>
+          <thead><tr><th>Param</th><th>Type</th><th>Notes</th></tr></thead>
+          <tbody>
+            <tr><td class="t-mono">symbol</td><td>string</td><td>e.g. <code>NIKKEI</code>, <code>SPY</code></td></tr>
+          </tbody>
+        </table>
+        <h3>Response</h3>
+        <pre><code>{
+  "symbol": "NIKKEI",
+  "timestamp": "1781276135672",
+  "bids": [
+    { "price": 66020, "size": 9,  "total": 594180 },
+    { "price": 66019, "size": 16, "total": 1056304 }
+  ],
+  "asks": [
+    { "price": 66021, "size": 7,  "total": 462147 },
+    { "price": 66022, "size": 16, "total": 1056352 }
+  ]
+}</code></pre>
+      </div>
+    </section>
+
+    <section id="rest-trades">
+      <h2>REST · Trades</h2>
+      <div class="endpoint">
+        <div class="head"><span class="method get">GET</span><span class="path">/trades?symbol={sym}&amp;limit={n}</span><span class="auth-tag no">public</span></div>
+        <p class="desc">Most recent executions. <code>limit</code> defaults to 50 (max 500). Omit <code>symbol</code> for all markets.</p>
+        <pre><code>{
+  "trades": [
+    { "trade_id": 10001, "symbol": "NIKKEI", "price": 66021,
+      "quantity": 1, "taker_side": "Buy", "ts": 1781276135672 }
+  ]
+}</code></pre>
+      </div>
+      <div class="endpoint">
+        <div class="head"><span class="method get">GET</span><span class="path">/trades/historical?symbol={sym}&amp;from={ms}&amp;to={ms}&amp;limit={n}</span><span class="auth-tag no">public</span></div>
+        <p class="desc">Time-ranged history from the persistent store. <code>limit</code> defaults to 5000 (max 50000). Returns a <code>count</code> alongside <code>trades</code>.</p>
+      </div>
+    </section>
+
+    <section id="rest-bots">
+      <h2>REST · Bots</h2>
+      <div class="endpoint">
+        <div class="head"><span class="method get">GET</span><span class="path">/bots</span><span class="auth-tag no">public</span></div>
+        <p class="desc">All connected strategies with live stats.</p>
+        <pre><code>{
+  "bots": [
+    { "user_id": "user_123", "client_id": "mm-bot", "name": "Market Maker",
+      "is_internal": true, "paused": false, "orders_placed": 1234,
+      "fills": 567, "volume": 1000000.5, "total_pnl": 5432.1,
+      "hourly_pnl": 123.45, "first_seen": 1781270000000,
+      "last_activity": 1781276789000 }
+  ]
+}</code></pre>
+      </div>
+      <div class="grid2">
+        <div class="endpoint">
+          <div class="head"><span class="method post">POST</span><span class="path">/bots/{client_id}/pause</span><span class="auth-tag req">auth</span></div>
+          <p class="desc">Cancels the bot's resting orders and disconnects it. Owner only; internal bots can't be paused.</p>
+          <pre><code>{ "ok": true, "client_id": "my-bot", "paused": true }</code></pre>
+        </div>
+        <div class="endpoint">
+          <div class="head"><span class="method post">POST</span><span class="path">/bots/{client_id}/resume</span><span class="auth-tag req">auth</span></div>
+          <p class="desc">Re-enables a paused bot.</p>
+          <pre><code>{ "ok": true, "client_id": "my-bot", "paused": false }</code></pre>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== WEBSOCKET ===================== -->
+    <section id="ws-connect">
+      <h2>WebSocket · Connecting</h2>
+      <div class="endpoint">
+        <div class="head"><span class="method ws">WS</span><span class="path">ws://localhost:9090/ws?api_key=sk_live_...</span><span class="auth-tag req">auth</span></div>
+        <p class="desc">Upgrade with the API key in the query string (or an <code>Authorization</code>/<code>Api-Key</code> header). On success the server immediately sends a <code>welcome</code> frame.</p>
+      </div>
+      <p>All frames are text (UTF-8 JSON) with a required <code>"t"</code> type field. Two streaming channels are available: <span class="badge">book</span> and <span class="badge">trades</span>.</p>
+    </section>
+
+    <section id="ws-inbound">
+      <h2>WebSocket · Client → Server</h2>
+
+      <h3>hello <span class="badge">identify</span></h3>
+      <p>Attach a label so your orders are attributed in the dashboard.</p>
+      <pre><code>{ "t": "hello", "client_id": "my-bot" }</code></pre>
+
+      <h3>subscribe <span class="badge">market data</span></h3>
+      <p>Channel is <code>"book"</code> or <code>"trades"</code>. A <code>book</code> subscription replies with a full snapshot, then streams <code>book_delta</code> frames.</p>
+      <pre><code>{ "t": "subscribe", "channel": "book", "symbol": "NIKKEI", "depth": 10 }</code></pre>
+
+      <h3>unsubscribe</h3>
+      <pre><code>{ "t": "unsubscribe", "channel": "book", "symbol": "NIKKEI" }</code></pre>
+
+      <h3>place_order <span class="badge">auth</span></h3>
+      <p><code>limit_price</code> is required for <code>Limit</code> orders. <code>client_order_id</code> is optional and echoed back.</p>
+      <pre><code>{
+  "t": "place_order",
+  "client_order_id": "o-1",
+  "symbol": "NIKKEI",
+  "side": "Buy",
+  "type": "Limit",
+  "quantity": 5,
+  "limit_price": 66020
+}</code></pre>
+
+      <h3>cancel_order</h3>
+      <pre><code>{ "t": "cancel_order", "order_id": 12345 }</code></pre>
+
+      <h3>ping</h3>
+      <pre><code>{ "t": "ping" }</code></pre>
+    </section>
+
+    <section id="ws-outbound">
+      <h2>WebSocket · Server → Client</h2>
+
+      <h3>welcome</h3>
+      <pre><code>{ "t": "welcome", "user_id": "user_123", "server_time": 1781276135672 }</code></pre>
+
+      <h3>book <span class="badge">snapshot</span></h3>
+      <p>Levels are <code>[price, qty]</code> pairs. <code>seq</code> is monotonic per symbol — track it to detect gaps.</p>
+      <pre><code>{
+  "t": "book", "symbol": "NIKKEI", "snapshot": true,
+  "seq": 1000, "ts": 1781276135672,
+  "bids": [[66020, 9], [66019, 16]],
+  "asks": [[66021, 7], [66022, 16]]
+}</code></pre>
+
+      <h3>book_delta <span class="badge">incremental</span></h3>
+      <p>Apply changes in order. <code>qty = 0</code> deletes a level; <code>qty &gt; 0</code> sets it. If <code>seq</code> is not exactly previous + 1, re-subscribe to resync.</p>
+      <pre><code>{
+  "t": "book_delta", "symbol": "NIKKEI",
+  "seq": 1001, "ts": 1781276135890,
+  "bids": [[66020, 12], [66015, 0]],
+  "asks": [[66021, 0]]
+}</code></pre>
+
+      <h3>trade</h3>
+      <pre><code>{ "t": "trade", "symbol": "NIKKEI", "trade_id": 10001,
+  "price": 66021, "quantity": 1, "taker_side": "Buy", "ts": 1781276135672 }</code></pre>
+
+      <h3>order_ack / order_reject</h3>
+      <pre><code>{ "t": "order_ack", "order_id": 12345, "client_order_id": "o-1",
+  "symbol": "NIKKEI", "side": "Buy", "status": "Pending", "ts": 1781276135672 }
+
+{ "t": "order_reject", "order_id": 0, "client_order_id": "o-1",
+  "symbol": "NIKKEI", "side": "Buy", "status": "Rejected",
+  "reason": "missing_or_invalid_limit_price", "ts": 1781276135672 }</code></pre>
+
+      <h3>order_fill</h3>
+      <pre><code>{
+  "t": "order_fill", "order_id": 12345, "client_order_id": "o-1",
+  "symbol": "NIKKEI", "side": "Buy", "status": "Filled",
+  "price": 66021, "quantity": 5, "remaining": 0,
+  "total_filled": 5, "avg_price": 66021, "trade_id": 10002,
+  "ts": 1781276135672
+}</code></pre>
+
+      <h3>cancel_ack</h3>
+      <pre><code>{ "t": "cancel_ack", "order_id": 12345, "symbol": "NIKKEI",
+  "side": "Buy", "status": "Cancelled", "reason": "", "ts": 1781276135672 }</code></pre>
+
+      <h3>error / pong</h3>
+      <pre><code>{ "t": "error", "code": "UNKNOWN_SYMBOL", "message": "Symbol not found: FOO" }
+{ "t": "pong", "ts": 1781276135672 }</code></pre>
+    </section>
+
+    <section id="ws-flow">
+      <h2>WebSocket · Example session</h2>
+      <pre><code>// 1. connect
+ws = new WebSocket("ws://localhost:9090/ws?api_key=sk_live_...")
+
+// 2. server greets
+&lt;- { "t": "welcome", "user_id": "user_123", "server_time": 1781276135672 }
+
+// 3. identify + subscribe
+-&gt; { "t": "hello", "client_id": "my-bot" }
+-&gt; { "t": "subscribe", "channel": "book", "symbol": "NIKKEI" }
+&lt;- { "t": "book", "symbol": "NIKKEI", "snapshot": true, "seq": 1000, ... }
+&lt;- { "t": "book_delta", "symbol": "NIKKEI", "seq": 1001, ... }
+
+// 4. trade
+-&gt; { "t": "place_order", "symbol": "NIKKEI", "side": "Buy",
+      "type": "Limit", "quantity": 5, "limit_price": 66021 }
+&lt;- { "t": "order_ack",  "order_id": 12345, "status": "Pending", ... }
+&lt;- { "t": "order_fill", "order_id": 12345, "status": "Filled", ... }</code></pre>
+    </section>
+
+    <footer>
+      <em>Bubbles</em> · NUS Orbital 2026 · matching engine in C++ · This page is served from memory at <code>/docs</code> by the engine.
+    </footer>
+  </main>
+</div>
+</body>
+</html>
