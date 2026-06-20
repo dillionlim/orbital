@@ -78,9 +78,18 @@ const DEFAULT_CONFIG: ServerConfig = {
     auth_cache_ttl_seconds: 300,
   },
   symbols: [
-    { name: 'BTC-USD', id: 1, mid: 50000, limitMode: 'none', maxPosition: 100, maxLong: 100, maxShort: 100 },
-    { name: 'ETH-USD', id: 2, mid: 3000, limitMode: 'none', maxPosition: 100, maxLong: 100, maxShort: 100 },
-    { name: 'LTC-USD', id: 3, mid: 100, limitMode: 'none', maxPosition: 100, maxLong: 100, maxShort: 100 },
+    // Defaults mirror the engine's shipped markets (scripts/server.json.example):
+    // index futures + the ETFs that track the same indices.
+    { name: 'ES',  id: 1,  mid: 7400,  limitMode: 'none', maxPosition: 100, maxLong: 100, maxShort: 100 },
+    { name: 'NKD', id: 2,  mid: 67475, limitMode: 'none', maxPosition: 100, maxLong: 100, maxShort: 100 },
+    { name: 'NQ',  id: 3,  mid: 29678, limitMode: 'none', maxPosition: 100, maxLong: 100, maxShort: 100 },
+    { name: 'YM',  id: 4,  mid: 51608, limitMode: 'none', maxPosition: 100, maxLong: 100, maxShort: 100 },
+    { name: 'RTY', id: 5,  mid: 2949,  limitMode: 'none', maxPosition: 100, maxLong: 100, maxShort: 100 },
+    { name: 'SPY', id: 6,  mid: 740,   limitMode: 'none', maxPosition: 100, maxLong: 100, maxShort: 100 },
+    { name: 'EWJ', id: 7,  mid: 92,    limitMode: 'none', maxPosition: 100, maxLong: 100, maxShort: 100 },
+    { name: 'EWH', id: 8,  mid: 22,    limitMode: 'none', maxPosition: 100, maxLong: 100, maxShort: 100 },
+    { name: 'EWY', id: 9,  mid: 197,   limitMode: 'none', maxPosition: 100, maxLong: 100, maxShort: 100 },
+    { name: 'FEZ', id: 10, mid: 69,    limitMode: 'none', maxPosition: 100, maxLong: 100, maxShort: 100 },
   ],
   market_maker: {
     enabled: true,
@@ -445,7 +454,7 @@ export default function ConfigGeneratorPage() {
                         type="text"
                         className={inputCls}
                         value={s.name}
-                        placeholder="BTC-USD"
+                        placeholder="ES"
                         onChange={(e) => updateSymbol(i, { name: e.target.value })}
                       />
                       <input

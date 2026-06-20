@@ -113,6 +113,16 @@ int main(int argc, char* argv[]) {
         return 1;
     }
     if (port_override > 0) cfg.port = port_override;
+    // Env override for the backend URL. Without this, a containerized engine is
+    // stuck with the baked config's `http://localhost:3010`, which inside the
+    // container points at the container itself — so API-key validation and the
+    // index-price feed can never reach the host backend (auth 401s, bots and
+    // dashboard can't connect). Let `docker run` redirect it:
+    //   docker run -e ORBITAL_BACKEND_URL=http://host.docker.internal:3010 ...
+    // CLI --backend-url still wins over the env var.
+    if (const char* env_backend = std::getenv("ORBITAL_BACKEND_URL")) {
+        if (env_backend[0] != '\0') cfg.backend_url = env_backend;
+    }
     if (!backend_override.empty()) cfg.backend_url = backend_override;
     if (!db_override.empty()) cfg.db_path = db_override;
     if (no_mm) cfg.market_maker.enabled = false;

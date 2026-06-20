@@ -42,7 +42,7 @@ from typing import Optional
 from lib import BotClient, env_api_key, env_server
 
 CLIENT_ID = os.environ.get("ORBITAL_BOT_NAME", "ext-mm")
-SYMBOLS = os.environ.get("ORBITAL_SYMBOLS", "BTC-USD,ETH-USD,LTC-USD").split(",")
+SYMBOLS = os.environ.get("ORBITAL_SYMBOLS", "ES,NQ,SPY").split(",")
 SPREAD_BPS = float(os.environ.get("ORBITAL_SPREAD_BPS", "8"))      # half = 4bps each side
 SIZE = int(os.environ.get("ORBITAL_SIZE", "3"))
 REFRESH_S = float(os.environ.get("ORBITAL_REFRESH_S", "1.5"))

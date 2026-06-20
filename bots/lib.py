@@ -10,7 +10,7 @@ Usage:
     async def main():
         async with BotClient("ws://localhost:9090/", env_api_key(),
                              client_id="my-bot") as bot:
-            await bot.subscribe("book", "BTC-USD")
+            await bot.subscribe("book", "ES")
             async for ev in bot.events():
                 ...
 """
@@ -82,12 +82,31 @@ class TopOfBook:
     ask: Optional[float] = None
     bid_size: int = 0
     ask_size: int = 0
+    # Full per-side book (price -> qty), maintained from the initial `book`
+    # snapshot plus subsequent `book_delta` patches. The engine sends one
+    # snapshot at subscribe time, then only incremental deltas — without
+    # applying the deltas, bid/ask freeze at subscribe time and bots quote
+    # against a stale top (orders never cross, never fill).
+    bids: dict[float, int] = field(default_factory=dict)
+    asks: dict[float, int] = field(default_factory=dict)
 
     @property
     def mid(self) -> Optional[float]:
         if self.bid is not None and self.ask is not None:
             return (self.bid + self.ask) / 2.0
         return self.bid or self.ask
+
+    def _recompute_top(self) -> None:
+        if self.bids:
+            self.bid = max(self.bids)
+            self.bid_size = self.bids[self.bid]
+        else:
+            self.bid, self.bid_size = None, 0
+        if self.asks:
+            self.ask = min(self.asks)
+            self.ask_size = self.asks[self.ask]
+        else:
+            self.ask, self.ask_size = None, 0
 
 
 @dataclass
@@ -202,18 +221,29 @@ class BotClient:
     def _update_state(self, ev: dict) -> None:
         t = ev.get("t")
         if t == "book":
+            # Full snapshot — replace the maintained book wholesale.
             sym = ev.get("symbol", "")
             top = self.state.tops.setdefault(sym, TopOfBook())
-            bids = ev.get("bids") or []
-            asks = ev.get("asks") or []
-            if bids:
-                top.bid, top.bid_size = float(bids[0][0]), int(bids[0][1])
-            else:
-                top.bid, top.bid_size = None, 0
-            if asks:
-                top.ask, top.ask_size = float(asks[0][0]), int(asks[0][1])
-            else:
-                top.ask, top.ask_size = None, 0
+            top.bids = {float(p): int(q) for p, q in (ev.get("bids") or []) if int(q) > 0}
+            top.asks = {float(p): int(q) for p, q in (ev.get("asks") or []) if int(q) > 0}
+            top._recompute_top()
+        elif t == "book_delta":
+            # Incremental patch: qty 0 removes the level, otherwise set it.
+            sym = ev.get("symbol", "")
+            top = self.state.tops.setdefault(sym, TopOfBook())
+            for p, q in (ev.get("bids") or []):
+                price, qty = float(p), int(q)
+                if qty > 0:
+                    top.bids[price] = qty
+                else:
+                    top.bids.pop(price, None)
+            for p, q in (ev.get("asks") or []):
+                price, qty = float(p), int(q)
+                if qty > 0:
+                    top.asks[price] = qty
+                else:
+                    top.asks.pop(price, None)
+            top._recompute_top()
         elif t == "trade":
             self.state.last_trade_price = float(ev.get("price", 0.0))
         elif t == "order_ack":
@@ -227,6 +257,13 @@ class BotClient:
         elif t == "cancel_ack":
             oid = int(ev.get("order_id", 0))
             self.state.open_orders.pop(oid, None)
+        elif t == "error":
+            # Surface server-side rejections instead of silently dropping them.
+            # The classic "my bot does nothing" cause is a stale symbol: the
+            # engine replies UNKNOWN_SYMBOL to subscribe/place_order and the bot
+            # waits forever for a book that never arrives. Make it loud.
+            print(f"[{self.client_id}] server error: {ev.get('code')} "
+                  f"{ev.get('message', '')}", file=sys.stderr)
 
 
 async def run_with_periodic_tick(

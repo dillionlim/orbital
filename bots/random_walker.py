@@ -20,7 +20,7 @@ import sys
 from lib import BotClient, env_server, env_taker_api_key, run_with_periodic_tick
 
 CLIENT_ID = os.environ.get("ORBITAL_BOT_NAME", "random-1")
-SYMBOL = os.environ.get("ORBITAL_SYMBOL", "BTC-USD")
+SYMBOL = os.environ.get("ORBITAL_SYMBOL", "ES")
 TICK_S = float(os.environ.get("ORBITAL_TICK_S", "2.5"))
 AGGRESSIVE_PROB = float(os.environ.get("ORBITAL_AGG", "0.4"))
 

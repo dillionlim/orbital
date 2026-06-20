@@ -67,7 +67,7 @@ script. Common ones:
 | Var | Default | Effect |
 |---|---|---|
 | `ORBITAL_BOT_NAME` | per script | Label the bot uses in `hello` |
-| `ORBITAL_SYMBOL` / `ORBITAL_SYMBOLS` | `BTC-USD,…` | Which symbols to trade |
+| `ORBITAL_SYMBOL` / `ORBITAL_SYMBOLS` | `ES,…` | Which symbols to trade |
 | `ORBITAL_TICK_S` | varies | Seconds between actions |
 | `ORBITAL_QTY` | small | Order size per action |
 | `ORBITAL_THRESHOLD_BPS` | 5–8 | Trigger sensitivity (momentum / mean-rev) |
@@ -82,13 +82,13 @@ import asyncio
 from lib import BotClient, env_api_key, env_server, run_with_periodic_tick
 
 async def on_tick(bot):
-    top = bot.state.tops.get("BTC-USD")
+    top = bot.state.tops.get("ES")
     if top and top.mid:
-        await bot.place_limit("BTC-USD", "Buy", 1, top.mid - 5)
+        await bot.place_limit("ES", "Buy", 1, top.mid - 5)
 
 async def main():
     async with BotClient(env_server(), env_api_key(), client_id="my-bot") as bot:
-        await bot.subscribe("book", "BTC-USD")
+        await bot.subscribe("book", "ES")
         await run_with_periodic_tick(bot, 3.0, on_tick)
 
 asyncio.run(main())

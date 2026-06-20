@@ -8,8 +8,17 @@
 #   runtime stage →  debian:12-slim, just the binary + a default config.
 #
 # Build: `bash scripts/build-image.sh`  (wraps `docker build` + `docker save`).
-# Run:   `docker run -p 9090:9090 -v engine-data:/data orbital-engine`
-#         (override the bundled config by mounting -v ./server.json:/cfg/server.json:ro)
+# Run:   docker run -p 9090:9090 -v engine-data:/data \
+#               --add-host=host.docker.internal:host-gateway \
+#               -e ORBITAL_BACKEND_URL=http://host.docker.internal:3010 \
+#               orbital-engine
+#         The ORBITAL_BACKEND_URL env var is REQUIRED when the backend runs on
+#         the host: inside the container `localhost` is the container itself, so
+#         the baked default (http://localhost:3010) can't reach the host backend
+#         and every API-key validation 401s (bots + dashboard fail to connect).
+#         host.docker.internal resolves to the host; on Linux it needs the
+#         --add-host flag above. Override the bundled config instead by mounting
+#         -v ./server.json:/cfg/server.json:ro with backend_url edited.
 
 # ---- Build stage ---------------------------------------------------------
 

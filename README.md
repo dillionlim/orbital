@@ -1,4 +1,4 @@
-# Orbital
+# Bubbles (Orbital Project)
 
 A self-hostable algorithmic trading sandbox. Bots connect to a C++ matching engine over WebSocket, place orders, and trade against an in-process market maker (or each other). A Next.js dashboard shows the order book, trades, and per-bot PnL in real time.
 

@@ -22,7 +22,7 @@ import time
 from lib import BotClient, env_server, env_taker_api_key
 
 CLIENT_ID = os.environ.get("ORBITAL_BOT_NAME", "mean-rev-1")
-SYMBOL = os.environ.get("ORBITAL_SYMBOL", "BTC-USD")
+SYMBOL = os.environ.get("ORBITAL_SYMBOL", "ES")
 WINDOW = int(os.environ.get("ORBITAL_WINDOW", "12"))
 THRESHOLD_BPS = float(os.environ.get("ORBITAL_THRESHOLD_BPS", "8"))
 QTY = int(os.environ.get("ORBITAL_QTY", "1"))

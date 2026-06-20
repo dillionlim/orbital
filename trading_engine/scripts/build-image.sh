@@ -63,12 +63,20 @@ Files in this directory:
      /data             → SQLite database (persistent)
 
    docker run --rm -p 9090:9090 \\
+              --add-host=host.docker.internal:host-gateway \\
+              -e ORBITAL_BACKEND_URL=http://host.docker.internal:3010 \\
               -v "\$(pwd)/server.json:/cfg/server.json:ro" \\
               -v engine-data:/data \\
               ${IMAGE_NAME}:${IMAGE_TAG}
 
    Engine listens on http://localhost:9090.
    curl http://localhost:9090/health   →  {"status":"healthy"}
+
+   NOTE: ORBITAL_BACKEND_URL must point at the machine running the Orbital
+   backend (NestJS, default port 3010). Inside a container "localhost" is the
+   container itself, so without this the engine can't validate API keys and
+   bots/dashboard fail to connect with 401s. host.docker.internal resolves to
+   the host; on Linux it requires the --add-host flag shown above.
 
 4. To stop:  Ctrl-C, or  docker stop <container-id>
    To inspect data:  docker volume inspect engine-data
