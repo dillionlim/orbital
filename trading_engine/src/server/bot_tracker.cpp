@@ -23,11 +23,11 @@ constexpr const char* kMmUserId = "internal:market_maker";
 // without bound. 100 is enough headroom for legitimate multi-strategy
 // users while keeping the OOM amplifier closed.
 //
-// $ORBITAL_MAX_CLIENT_IDS_PER_USER overrides at startup (read once and cached
+// $BUBBLES_MAX_CLIENT_IDS_PER_USER overrides at startup (read once and cached
 // — no need to re-read per call). Bumps only take effect on engine restart.
 size_t max_client_ids_per_user() {
     static const size_t cached = []() -> size_t {
-        const char* env = std::getenv("ORBITAL_MAX_CLIENT_IDS_PER_USER");
+        const char* env = std::getenv("BUBBLES_MAX_CLIENT_IDS_PER_USER");
         if (!env || !*env) return 100;
         try {
             const long parsed = std::stol(env);

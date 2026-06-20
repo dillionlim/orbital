@@ -1,6 +1,6 @@
 # Mock trading bots
 
-Five Python scripts that connect to the Orbital trading engine over WebSocket
+Five Python scripts that connect to the Bubbles trading engine over WebSocket
 and demonstrate distinct strategies. They share a tiny client wrapper
 (`lib.py`) so each bot stays short and readable.
 
@@ -20,7 +20,7 @@ If you don't use `uv`, plain `pip install websockets python-dotenv` followed
 by `python3 taker.py` works too.
 
 The default WebSocket URL is `ws://localhost:9090/`. Override with
-`ORBITAL_WS=...` (in `.env` or your shell) if the engine runs elsewhere.
+`BUBBLES_WS=...` (in `.env` or your shell) if the engine runs elsewhere.
 
 `.env` is loaded automatically by `lib.py` (via `python-dotenv`) and by
 `run_all.sh` before launching child processes. Real shell exports always win
@@ -47,7 +47,7 @@ line in **Performance Analytics**.
 One at a time (recommended for development — easier to read logs):
 
 ```bash
-ORBITAL_BOT_NAME=alice uv run taker.py
+BUBBLES_BOT_NAME=alice uv run taker.py
 ```
 
 All at once:
@@ -66,12 +66,12 @@ script. Common ones:
 
 | Var | Default | Effect |
 |---|---|---|
-| `ORBITAL_BOT_NAME` | per script | Label the bot uses in `hello` |
-| `ORBITAL_SYMBOL` / `ORBITAL_SYMBOLS` | `ES,…` | Which symbols to trade |
-| `ORBITAL_TICK_S` | varies | Seconds between actions |
-| `ORBITAL_QTY` | small | Order size per action |
-| `ORBITAL_THRESHOLD_BPS` | 5–8 | Trigger sensitivity (momentum / mean-rev) |
-| `ORBITAL_SPREAD_BPS` | 30 | Total spread for the external MM |
+| `BUBBLES_BOT_NAME` | per script | Label the bot uses in `hello` |
+| `BUBBLES_SYMBOL` / `BUBBLES_SYMBOLS` | `ES,…` | Which symbols to trade |
+| `BUBBLES_TICK_S` | varies | Seconds between actions |
+| `BUBBLES_QTY` | small | Order size per action |
+| `BUBBLES_THRESHOLD_BPS` | 5–8 | Trigger sensitivity (momentum / mean-rev) |
+| `BUBBLES_SPREAD_BPS` | 30 | Total spread for the external MM |
 
 ## Writing a new strategy
 

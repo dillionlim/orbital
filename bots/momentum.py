@@ -22,13 +22,13 @@ import time
 
 from lib import BotClient, env_server, env_taker_api_key
 
-CLIENT_ID = os.environ.get("ORBITAL_BOT_NAME", "momentum-1")
-SYMBOL = os.environ.get("ORBITAL_SYMBOL", "ES")
-WINDOW = int(os.environ.get("ORBITAL_WINDOW", "10"))
-THRESHOLD_BPS = float(os.environ.get("ORBITAL_THRESHOLD_BPS", "5.0"))
-QTY = int(os.environ.get("ORBITAL_QTY", "1"))
-COOLDOWN_S = float(os.environ.get("ORBITAL_COOLDOWN_S", "4.0"))
-EXECUTION_OFFSET = float(os.environ.get("ORBITAL_EXECUTION_OFFSET", "5"))
+CLIENT_ID = os.environ.get("BUBBLES_BOT_NAME", "momentum-1")
+SYMBOL = os.environ.get("BUBBLES_SYMBOL", "ES")
+WINDOW = int(os.environ.get("BUBBLES_WINDOW", "10"))
+THRESHOLD_BPS = float(os.environ.get("BUBBLES_THRESHOLD_BPS", "5.0"))
+QTY = int(os.environ.get("BUBBLES_QTY", "1"))
+COOLDOWN_S = float(os.environ.get("BUBBLES_COOLDOWN_S", "4.0"))
+EXECUTION_OFFSET = float(os.environ.get("BUBBLES_EXECUTION_OFFSET", "5"))
 
 
 async def main() -> None:

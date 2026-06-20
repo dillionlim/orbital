@@ -5,7 +5,7 @@ ENV POSTGRES_USER=postgres
 ENV POSTGRES_PASSWORD=postgrespassword
 ENV POSTGRES_DB=postgres
 # Expose the default PostgreSQL port (postgres listens on 5432; map it at
-# runtime with `docker run -p 5432:5432 orbital-db`).
+# runtime with `docker run -p 5432:5432 bubbles-db`).
 EXPOSE 5432
 # Command to run the PostgreSQL server
 CMD ["postgres"]

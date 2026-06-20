@@ -118,9 +118,9 @@ int main(int argc, char* argv[]) {
     // container points at the container itself — so API-key validation and the
     // index-price feed can never reach the host backend (auth 401s, bots and
     // dashboard can't connect). Let `docker run` redirect it:
-    //   docker run -e ORBITAL_BACKEND_URL=http://host.docker.internal:3010 ...
+    //   docker run -e BUBBLES_BACKEND_URL=http://host.docker.internal:3010 ...
     // CLI --backend-url still wins over the env var.
-    if (const char* env_backend = std::getenv("ORBITAL_BACKEND_URL")) {
+    if (const char* env_backend = std::getenv("BUBBLES_BACKEND_URL")) {
         if (env_backend[0] != '\0') cfg.backend_url = env_backend;
     }
     if (!backend_override.empty()) cfg.backend_url = backend_override;

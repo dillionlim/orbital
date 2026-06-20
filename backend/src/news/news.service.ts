@@ -115,7 +115,7 @@ export class NewsService {
             this.http.get<string>(feed.url, {
               responseType: 'text',
               timeout: 8000,
-              headers: { 'User-Agent': 'Mozilla/5.0 (OrbitalNewsBot)' },
+              headers: { 'User-Agent': 'Mozilla/5.0 (BubblesNewsBot)' },
             }),
           );
           const xml = res.data;

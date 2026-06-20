@@ -1,5 +1,7 @@
 "use client";
 
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { useUser } from "@clerk/nextjs";
 import { Header } from "@/src/dashboard/Header";
 import { GlobalTradeTicker } from "@/src/dashboard/GlobalTradeTicker";
@@ -14,9 +16,17 @@ import { SimulatedBots } from "@/src/dashboard/SimulatedBots";
 import { Backtester } from "@/src/dashboard/Backtester";
 
 export default function Dashboard() {
-  const { isLoaded } = useUser();
+  const { isLoaded, isSignedIn } = useUser();
+  const router = useRouter();
 
-  if (!isLoaded) {
+  // Client-side guard backing up the route middleware: a signed-out user must
+  // never see the dashboard. (Belt-and-suspenders, and it avoids a flash of
+  // protected content while the middleware redirect is in flight.)
+  useEffect(() => {
+    if (isLoaded && !isSignedIn) router.replace("/");
+  }, [isLoaded, isSignedIn, router]);
+
+  if (!isLoaded || !isSignedIn) {
     return <div className="min-h-screen bg-slate-900 flex items-center justify-center text-white">Loading...</div>;
   }
 

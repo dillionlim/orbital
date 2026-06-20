@@ -1,7 +1,7 @@
 {
   "name": "orbital-backend",
   "version": "0.1.0",
-  "description": "Orbital OMS — NestJS",
+  "description": "Bubbles OMS — NestJS",
   "private": true,
   "scripts": {
     "build": "nest build",

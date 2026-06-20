@@ -1,5 +1,5 @@
 """
-Tiny shared library for Orbital trading bots.
+Tiny shared library for Bubbles trading bots.
 
 Every script in this directory uses BotClient — connect, send `hello`, place
 orders, react to events. Strategies stay short and demonstrative.
@@ -51,29 +51,29 @@ except (ValueError, TypeError):
 
 
 def env_api_key() -> str:
-    key = os.environ.get("ORBITAL_API_KEY", "")
+    key = os.environ.get("BUBBLES_API_KEY", "")
     if not key:
         key = "sk_live_" + "0" * 32
     return key
 
 
 def env_taker_api_key() -> str:
-    """Separate API key for aggressor bots, falling back to ORBITAL_API_KEY.
+    """Separate API key for aggressor bots, falling back to BUBBLES_API_KEY.
 
     The engine has self-trade prevention: when a taker matches a resting
     order from the same user_id, the resting order is cancelled rather
     than filled. Without two distinct user_ids, market-making bots in
     this directory can't actually profit from the takers in this directory
-    — STP eats every cross. Set ORBITAL_TAKER_API_KEY (different account)
+    — STP eats every cross. Set BUBBLES_TAKER_API_KEY (different account)
     to give your aggressor bots a separate identity so the maker bots
     actually fill.
     """
-    return os.environ.get("ORBITAL_TAKER_API_KEY", "") or env_api_key()
+    return os.environ.get("BUBBLES_TAKER_API_KEY", "") or env_api_key()
 
 
 def env_server() -> str:
     """Return the WS URL for the engine (default ws://localhost:9090/)."""
-    return os.environ.get("ORBITAL_WS", "ws://localhost:9090/")
+    return os.environ.get("BUBBLES_WS", "ws://localhost:9090/")
 
 
 @dataclass
@@ -119,7 +119,7 @@ class BotState:
 
 
 class BotClient:
-    """Minimal async WebSocket wrapper for the Orbital trading engine."""
+    """Minimal async WebSocket wrapper for the Bubbles trading engine."""
 
     def __init__(self, ws_url: str, api_key: str, client_id: str):
         self.ws_url = ws_url

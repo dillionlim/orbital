@@ -913,7 +913,7 @@ export default function ConfigGeneratorPage() {
                 <code className="text-blue-400">
                   docker run -p {cfg.server.port}:{cfg.server.port} -v
                   $(pwd)/server.json:/cfg/server.json:ro -v engine-data:/data
-                  orbital-engine
+                  bubbles-engine
                 </code>
               </div>
             </div>

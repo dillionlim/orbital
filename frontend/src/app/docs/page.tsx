@@ -265,7 +265,7 @@ export default function DocsPage() {
         <main className="min-w-0">
           {/* ============== Overview ============== */}
           <Section id="overview">
-            <h1 className="text-3xl font-bold text-white mb-3">Orbital Trading Engine</h1>
+            <h1 className="text-3xl font-bold text-white mb-3">Bubbles Trading Engine</h1>
             <p className="text-slate-300 mb-4">
               A self-contained C++20 trading server. Single port (default <Mono>:9090</Mono>) speaks
               both REST and WebSocket. Bots place orders over WebSocket against a real

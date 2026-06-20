@@ -24,7 +24,7 @@ When this strategy works:
 
 Important: the engine has self-trade prevention. If your aggressor bots
 share this bot's user_id, every cross gets cancelled instead of filled
-and you'll see places=lots, fills=0. Set ORBITAL_TAKER_API_KEY to a
+and you'll see places=lots, fills=0. Set BUBBLES_TAKER_API_KEY to a
 second account's key so taker.py et al run as a different user.
 
 Run:
@@ -41,14 +41,14 @@ from typing import Optional
 
 from lib import BotClient, env_api_key, env_server
 
-CLIENT_ID = os.environ.get("ORBITAL_BOT_NAME", "ext-mm")
-SYMBOLS = os.environ.get("ORBITAL_SYMBOLS", "ES,NQ,SPY").split(",")
-SPREAD_BPS = float(os.environ.get("ORBITAL_SPREAD_BPS", "8"))      # half = 4bps each side
-SIZE = int(os.environ.get("ORBITAL_SIZE", "3"))
-REFRESH_S = float(os.environ.get("ORBITAL_REFRESH_S", "1.5"))
-MAX_INVENTORY = int(os.environ.get("ORBITAL_MAX_INV", "30"))
-SKEW_BPS = float(os.environ.get("ORBITAL_SKEW_BPS", "6"))          # max mid skew at full inv
-PNL_EVERY_S = float(os.environ.get("ORBITAL_PNL_EVERY_S", "10.0"))
+CLIENT_ID = os.environ.get("BUBBLES_BOT_NAME", "ext-mm")
+SYMBOLS = os.environ.get("BUBBLES_SYMBOLS", "ES,NQ,SPY").split(",")
+SPREAD_BPS = float(os.environ.get("BUBBLES_SPREAD_BPS", "8"))      # half = 4bps each side
+SIZE = int(os.environ.get("BUBBLES_SIZE", "3"))
+REFRESH_S = float(os.environ.get("BUBBLES_REFRESH_S", "1.5"))
+MAX_INVENTORY = int(os.environ.get("BUBBLES_MAX_INV", "30"))
+SKEW_BPS = float(os.environ.get("BUBBLES_SKEW_BPS", "6"))          # max mid skew at full inv
+PNL_EVERY_S = float(os.environ.get("BUBBLES_PNL_EVERY_S", "10.0"))
 
 # Event-driven requote: when a trade prints this many bps from our quote
 # anchor, cancel + replace both sides immediately rather than waiting for
@@ -56,8 +56,8 @@ PNL_EVERY_S = float(os.environ.get("ORBITAL_PNL_EVERY_S", "10.0"))
 # moves (e.g. news bot cohort fills) and gets picked off on the wrong
 # side. Default = half the configured spread; cooldown rate-limits the
 # cancel/replace loop on bursty prints.
-DRIFT_BPS = float(os.environ.get("ORBITAL_DRIFT_BPS", str(SPREAD_BPS / 2)))
-REQUOTE_COOLDOWN_S = float(os.environ.get("ORBITAL_REQUOTE_COOLDOWN_S", "0.2"))
+DRIFT_BPS = float(os.environ.get("BUBBLES_DRIFT_BPS", str(SPREAD_BPS / 2)))
+REQUOTE_COOLDOWN_S = float(os.environ.get("BUBBLES_REQUOTE_COOLDOWN_S", "0.2"))
 
 
 class SymbolState:

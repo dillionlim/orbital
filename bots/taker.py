@@ -9,7 +9,7 @@ trade flow against the in-process market maker.
 Run:
     uv run taker.py
     # or with overrides:
-    ORBITAL_SYMBOLS=ES,SPY uv run taker.py
+    BUBBLES_SYMBOLS=ES,SPY uv run taker.py
 """
 
 from __future__ import annotations
@@ -21,9 +21,9 @@ import sys
 
 from lib import BotClient, env_server, env_taker_api_key, run_with_periodic_tick
 
-CLIENT_ID = os.environ.get("ORBITAL_BOT_NAME", "taker-1")
-SYMBOLS = os.environ.get("ORBITAL_SYMBOLS", "ES,NQ,SPY").split(",")
-TICK_S = float(os.environ.get("ORBITAL_TICK_S", "3.0"))
+CLIENT_ID = os.environ.get("BUBBLES_BOT_NAME", "taker-1")
+SYMBOLS = os.environ.get("BUBBLES_SYMBOLS", "ES,NQ,SPY").split(",")
+TICK_S = float(os.environ.get("BUBBLES_TICK_S", "3.0"))
 QTY_MIN, QTY_MAX = 1, 3
 
 

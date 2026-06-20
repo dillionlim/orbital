@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { useUser } from '@clerk/nextjs';
 import { Header } from '@/src/dashboard/Header';
 import { Key, RefreshCw, CheckCircle, Eye, EyeOff, Pencil, Check, X } from 'lucide-react';
@@ -21,7 +22,8 @@ function clerkError(err: unknown, fallback: string): string {
 }
 
 export default function ProfilePage() {
-  const { user, isLoaded } = useUser();
+  const { user, isLoaded, isSignedIn } = useUser();
+  const router = useRouter();
   const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
   const [visibleKey, setVisibleKey] = useState<string | null>(null);
@@ -62,6 +64,11 @@ export default function ProfilePage() {
     }
   }, [isLoaded, user]);
 
+  // Backstop the route middleware: bounce signed-out visitors off the profile.
+  useEffect(() => {
+    if (isLoaded && !isSignedIn) router.replace('/');
+  }, [isLoaded, isSignedIn, router]);
+
   const generateNewKey = async () => {
     setIsGenerating(true);
     try {
@@ -91,10 +98,15 @@ export default function ProfilePage() {
     setSavingUsername(true);
     setUsernameError(null);
     try {
+      // user.update() resolves with the updated resource and updates Clerk's
+      // reactive store, so the <span>{user.username}</span> re-renders on its
+      // own. (A follow-up user.reload() is redundant and, if it throws
+      // transiently, would surface a spurious "could not update" error on an
+      // edit that actually persisted — which looked like "it doesn't save".)
       await user.update({ username: next });
-      await user.reload();
       setEditingUsername(false);
     } catch (err) {
+      console.error('username update failed', err);
       setUsernameError(clerkError(err, 'Could not update username.'));
     } finally {
       setSavingUsername(false);
@@ -122,6 +134,7 @@ export default function ProfilePage() {
       setPendingEmailId(created.id);
       setEmailStage('verify');
     } catch (err) {
+      console.error('email add/verify-start failed', err);
       setEmailError(clerkError(err, 'Could not start email verification.'));
     } finally {
       setSavingEmail(false);
@@ -138,18 +151,19 @@ export default function ProfilePage() {
       const target = user.emailAddresses.find((e) => e.id === pendingEmailId);
       if (!target) throw new Error('pending email vanished');
       await target.attemptVerification({ code });
-      // Promote the freshly verified address to primary.
+      // Promote the freshly verified address to primary. update() refreshes the
+      // reactive store, so the displayed primary email updates without reload().
       await user.update({ primaryEmailAddressId: target.id });
-      await user.reload();
       resetEmail();
     } catch (err) {
+      console.error('email verification failed', err);
       setEmailError(clerkError(err, 'Incorrect or expired code.'));
     } finally {
       setSavingEmail(false);
     }
   };
 
-  if (!isLoaded) return <div className="min-h-screen bg-slate-900 flex items-center justify-center text-white">Loading...</div>;
+  if (!isLoaded || !isSignedIn) return <div className="min-h-screen bg-slate-900 flex items-center justify-center text-white">Loading...</div>;
 
   const fieldBox = "bg-slate-900 border border-slate-700 rounded-lg p-3";
   const inputCls = "flex-1 bg-slate-900 border border-slate-700 rounded-lg p-3 text-white text-sm focus:outline-none focus:border-blue-500";

@@ -128,10 +128,10 @@ AuthResult ApiKeyAuthenticator::validateWithBackend(std::string_view apiKey) {
     //      bodies, so secrets stop leaking into log files.
     //   2. The shared secret stops anyone other than this engine from
     //      hammering /api-keys/validate as a free DB-DoS amplifier.
-    // The shared secret comes from $ORBITAL_ENGINE_SECRET; if unset, we still
+    // The shared secret comes from $BUBBLES_ENGINE_SECRET; if unset, we still
     // try the request — backend will refuse if its own secret is configured,
     // and dev/local-only setups stay one-step.
-    const char* shared = std::getenv("ORBITAL_ENGINE_SECRET");
+    const char* shared = std::getenv("BUBBLES_ENGINE_SECRET");
     const std::string secret = shared ? shared : "";
     const std::string req_body = std::string("{\"key\":\"") + std::string(apiKey) + "\"}";
     std::string req = "POST /api-keys/validate HTTP/1.1\r\n";
