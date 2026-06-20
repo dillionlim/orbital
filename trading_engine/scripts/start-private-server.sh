@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Start a local Orbital trading server. Builds (Release) if needed and execs the engine.
+# Start a local Bubbles trading server. Builds (Release) if needed and execs the engine.
 # Usage:
 #   ./scripts/start-private-server.sh [path/to/server.json]
 # Defaults to scripts/server.json (copy from server.json.example).
@@ -9,7 +9,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-# Source .env if present so ORBITAL_ENGINE_SECRET / ORBITAL_MAX_CLIENT_IDS_PER_USER
+# Source .env if present so BUBBLES_ENGINE_SECRET / BUBBLES_MAX_CLIENT_IDS_PER_USER
 # / etc. land in the engine's environment without the user re-exporting them
 # every time. Existing shell exports still win (load order: shell → .env).
 if [ -f .env ]; then
@@ -19,8 +19,8 @@ if [ -f .env ]; then
     set +a
 fi
 
-if [ -z "${ORBITAL_ENGINE_SECRET:-}" ]; then
-    echo "warning: ORBITAL_ENGINE_SECRET not set; backend's /api-keys/validate" >&2
+if [ -z "${BUBBLES_ENGINE_SECRET:-}" ]; then
+    echo "warning: BUBBLES_ENGINE_SECRET not set; backend's /api-keys/validate" >&2
     echo "         will be open if its ENGINE_SHARED_SECRET is also unset" >&2
 fi
 

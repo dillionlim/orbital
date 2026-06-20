@@ -8,21 +8,21 @@
 #   OUT_DIR=/tmp bash scripts/build-image.sh          # custom output dir
 #
 # Recipient workflow:
-#   docker load < orbital-engine-latest.tar.gz
-#   docker run -p 9090:9090 -v engine-data:/data orbital-engine:latest
+#   docker load < bubbles-engine-latest.tar.gz
+#   docker run -p 9090:9090 -v engine-data:/data bubbles-engine:latest
 #
 # To use a custom config, mount it over the baked default:
 #   docker run -p 9090:9090 \
 #              -v $(pwd)/server.json:/cfg/server.json:ro \
 #              -v engine-data:/data \
-#              orbital-engine:latest
+#              bubbles-engine:latest
 
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-IMAGE_NAME="${IMAGE_NAME:-orbital-engine}"
+IMAGE_NAME="${IMAGE_NAME:-bubbles-engine}"
 IMAGE_TAG="${IMAGE_TAG:-latest}"
 OUT_DIR="${OUT_DIR:-./dist}"
 
@@ -45,7 +45,7 @@ cp scripts/server.json.example "$SIDECAR"
 # Generate a one-page README the recipient can follow without prior Docker
 # knowledge.
 cat > "${OUT_DIR}/README.txt" <<EOF
-Orbital Trading Engine — Docker bundle
+Bubbles Trading Engine — Docker bundle
 =======================================
 
 Files in this directory:
@@ -64,7 +64,7 @@ Files in this directory:
 
    docker run --rm -p 9090:9090 \\
               --add-host=host.docker.internal:host-gateway \\
-              -e ORBITAL_BACKEND_URL=http://host.docker.internal:3010 \\
+              -e BUBBLES_BACKEND_URL=http://host.docker.internal:3010 \\
               -v "\$(pwd)/server.json:/cfg/server.json:ro" \\
               -v engine-data:/data \\
               ${IMAGE_NAME}:${IMAGE_TAG}
@@ -72,7 +72,7 @@ Files in this directory:
    Engine listens on http://localhost:9090.
    curl http://localhost:9090/health   →  {"status":"healthy"}
 
-   NOTE: ORBITAL_BACKEND_URL must point at the machine running the Orbital
+   NOTE: BUBBLES_BACKEND_URL must point at the machine running the Bubbles
    backend (NestJS, default port 3010). Inside a container "localhost" is the
    container itself, so without this the engine can't validate API keys and
    bots/dashboard fail to connect with 401s. host.docker.internal resolves to
