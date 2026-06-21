@@ -11,7 +11,7 @@ std::string http_cors_preflight() {
     std::ostringstream oss;
     oss << "HTTP/1.1 204 No Content\r\n"
         << "Access-Control-Allow-Origin: *\r\n"
-        << "Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n"
+        << "Access-Control-Allow-Methods: GET, POST, DELETE, OPTIONS\r\n"
         << "Access-Control-Allow-Headers: Origin, Content-Type, Authorization, Api-Key, Accept, "
            "Access-Control-Request-Method, Access-Control-Request-Headers, Cache-Control, Pragma\r\n"
         << "Access-Control-Max-Age: 86400\r\n"
@@ -38,7 +38,7 @@ std::string http_response(int status_code, std::string_view body, std::string_vi
         << "Content-Type: " << content_type << "\r\n"
         << "Content-Length: " << body.size() << "\r\n"
         << "Access-Control-Allow-Origin: *\r\n"
-        << "Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n"
+        << "Access-Control-Allow-Methods: GET, POST, DELETE, OPTIONS\r\n"
         << "Access-Control-Allow-Headers: Origin, Content-Type, Authorization, Api-Key, Accept, "
            "Cache-Control, Pragma\r\n"
         << "Access-Control-Allow-Credentials: false\r\n"
