@@ -64,9 +64,17 @@ type Compressors = typeof import('hyparquet-compressors');
 @Injectable()
 export class HistoricalDataService {
   private readonly logger = new Logger(HistoricalDataService.name);
-  private readonly dataDir = process.env.HISTORICAL_DATA_DIR
+  // Backtester parquet source. Prefer a remote base URL (e.g. a Supabase
+  // Storage public bucket) — hyparquet reads it with HTTP range requests, so the
+  // ~260 MB of datasets are never bundled into the serverless function. Fall
+  // back to a local dir for dev. BOTH come from env (no static path), so
+  // Vercel's file-tracer has nothing to pull in.
+  //   DATA_BASE_URL        e.g. https://<ref>.supabase.co/storage/v1/object/public/backtest
+  //   HISTORICAL_DATA_DIR  e.g. ../data   (local dev)
+  private readonly remoteBase = (process.env.DATA_BASE_URL ?? '').replace(/\/+$/, '');
+  private readonly localDir = process.env.HISTORICAL_DATA_DIR
     ? path.resolve(process.env.HISTORICAL_DATA_DIR)
-    : path.resolve(process.cwd(), '..', 'data');
+    : '';
 
   private lib: Promise<{ hp: Hyparquet; compressors: Compressors['compressors'] }> | null =
     null;
@@ -103,15 +111,30 @@ export class HistoricalDataService {
     }
     const granularity: Granularity =
       granularityRaw === 'daily' ? 'daily' : 'minute';
-    const file = path.join(this.dataDir, GRAN_DIR[granularity], `${symbol}.parquet`);
-    if (!fs.existsSync(file)) {
-      throw new NotFoundException(
-        `no ${granularity} data for ${symbol} (looked in ${this.dataDir})`,
-      );
+    const rel = `${GRAN_DIR[granularity]}/${symbol}.parquet`;
+    const { hp, compressors } = await this.load();
+
+    // Remote (range-read over HTTP) takes precedence; else local file; else 404.
+    let f: Awaited<ReturnType<Hyparquet['asyncBufferFromFile']>>;
+    try {
+      if (this.remoteBase) {
+        f = await hp.asyncBufferFromUrl({ url: `${this.remoteBase}/${rel}` });
+      } else if (this.localDir) {
+        const file = path.join(this.localDir, rel);
+        if (!fs.existsSync(file)) {
+          throw new NotFoundException(`no ${granularity} data for ${symbol}`);
+        }
+        f = await hp.asyncBufferFromFile(file);
+      } else {
+        throw new NotFoundException(
+          'backtester data not configured (set DATA_BASE_URL or HISTORICAL_DATA_DIR)',
+        );
+      }
+    } catch (e) {
+      if (e instanceof NotFoundException) throw e;
+      throw new NotFoundException(`no ${granularity} data for ${symbol}`);
     }
 
-    const { hp, compressors } = await this.load();
-    const f = await hp.asyncBufferFromFile(file);
     const meta = await hp.parquetMetadataAsync(f);
     const nrows = Number(meta.num_rows);
     if (nrows === 0) {
@@ -119,7 +142,7 @@ export class HistoricalDataService {
     }
 
     // ts column (cached) → find the first row inside the lookback window.
-    let tsArr = this.tsCache.get(file);
+    let tsArr = this.tsCache.get(rel);
     if (!tsArr) {
       const tsRows = (await hp.parquetReadObjects({
         file: f,
@@ -129,7 +152,7 @@ export class HistoricalDataService {
         rowEnd: nrows,
       })) as Array<{ ts: number | bigint }>;
       tsArr = tsRows.map((r) => Number(r.ts));
-      this.tsCache.set(file, tsArr);
+      this.tsCache.set(rel, tsArr);
     }
     const lastTs = tsArr[nrows - 1];
     const winMs = RANGE_MS[rangeRaw] ?? RANGE_MS['1mo'];
