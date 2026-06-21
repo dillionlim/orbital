@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { DEFAULT_SERVER } from '../services/engineUrl';
 
 // Reactive accessor for the user-selected trading server.
 //
@@ -10,7 +11,7 @@ import { useEffect, useState } from 'react';
 
 const STORAGE_KEY = 'currentServer';
 const EVENT = 'orbital:currentServer';
-const FALLBACK_SERVER = 'localhost:9090';
+const FALLBACK_SERVER = DEFAULT_SERVER;
 
 function read(): string {
   if (typeof window === 'undefined') return FALLBACK_SERVER;

@@ -1,3 +1,4 @@
+import { wsBase } from './engineUrl';
 // Shared WebSocket connection to a trading engine. One physical socket per
 // (server, apiKey); components subscribe to (channel, symbol) tuples.
 //
@@ -80,7 +81,7 @@ class EngineStream {
   private apiKey: string;
 
   constructor(server: string, apiKey: string) {
-    this.url = `ws://${server}/ws`;
+    this.url = `${wsBase(server)}/ws`;
     this.apiKey = apiKey;
     this.connect();
   }

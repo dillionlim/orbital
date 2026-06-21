@@ -1,3 +1,4 @@
+import { httpBase } from './engineUrl';
 // Resolves the current API key against an engine's `/me` endpoint to learn
 // which `user_id` the engine sees us as. Used to decide which bot rows the
 // signed-in user owns (and therefore which pause/resume buttons to render).
@@ -11,7 +12,7 @@ export async function fetchEngineUserId(
   apiKey: string,
   signal?: AbortSignal,
 ): Promise<string | null> {
-  const res = await fetch(`http://${server}/me`, {
+  const res = await fetch(`${httpBase(server)}/me`, {
     headers: { 'Api-Key': apiKey },
     signal,
   });

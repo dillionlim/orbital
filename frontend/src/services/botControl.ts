@@ -1,3 +1,4 @@
+import { httpBase } from './engineUrl';
 // Pause / resume a bot on the engine. Owner-only — the engine validates the
 // API key, derives the user_id, and refuses if it doesn't match the bot's
 // recorded owner. Pausing also kicks any live WS sessions for that client_id.
@@ -23,7 +24,7 @@ async function call(
 ): Promise<PauseResponse> {
   try {
     const res = await fetch(
-      `http://${server}/bots/${encodeURIComponent(clientId)}/${action}`,
+      `${httpBase(server)}/bots/${encodeURIComponent(clientId)}/${action}`,
       { method: 'POST', headers: { 'Api-Key': apiKey } },
     );
     if (res.ok) return { ok: true };

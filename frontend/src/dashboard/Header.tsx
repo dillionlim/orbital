@@ -9,8 +9,8 @@ import { ApiKeyBadge } from './ApiKeyBadge';
 import { CustomDropdown } from './CustomDropdown';
 import { setCurrentServer as broadcastCurrentServer } from '../hooks/useCurrentServer';
 import BubblesIcon from '../ui/BubblesIcon';
+import { httpBase, DEFAULT_SERVER } from '../services/engineUrl';
 
-const DEFAULT_SERVER = 'localhost:9090';
 const KEY_CURRENT = 'currentServer';
 const KEY_SERVERS = 'orbital_servers';
 
@@ -57,14 +57,11 @@ export const Header: React.FC = () => {
   const checkServerHealth = async (ip: string): Promise<boolean> => {
     if (!ip.trim()) return false;
     
-    const [host, port] = ip.split(':');
-    const checkPort = port;
-    
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 3000);
-      
-      const response = await fetch(`http://${host}:${checkPort}/health?_t=${Date.now()}`, {
+
+      const response = await fetch(`${httpBase(ip)}/health?_t=${Date.now()}`, {
         method: 'GET',
         signal: controller.signal
       });
