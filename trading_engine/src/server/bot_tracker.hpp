@@ -56,6 +56,12 @@ public:
     [[nodiscard]] PauseResult pause(std::string_view client_id, std::string_view requesting_user_id);
     [[nodiscard]] PauseResult resume(std::string_view client_id, std::string_view requesting_user_id);
 
+    // Forget a bot row entirely (owner-only). Clears stale, disconnected bots
+    // from /bots. Same outcomes as pause (NotFound / NotOwner / InternalBot). A
+    // still-live bot would re-register on its next event, so the REST handler
+    // disconnects it before calling this.
+    [[nodiscard]] PauseResult remove(std::string_view client_id, std::string_view requesting_user_id);
+
     // Used by Dispatcher on `hello` (and defensively on place_order) to
     // reject paused bots' traffic. Cheap; called per inbound message.
     // Takes user_id so two distinct users can't pause each other's bots

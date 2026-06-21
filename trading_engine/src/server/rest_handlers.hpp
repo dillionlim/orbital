@@ -53,6 +53,9 @@ private:
     // pause==true → POST /bots/:client_id/pause; false → /resume.
     [[nodiscard]] std::string handle_bot_pause(std::string_view client_id,
                                                std::string_view request, bool pause);
+    // DELETE /bots/:client_id — forget a (disconnected) bot row, owner-only.
+    [[nodiscard]] std::string handle_bot_remove(std::string_view client_id,
+                                                std::string_view request);
 
     int port_;
     ServerMetrics& metrics_;

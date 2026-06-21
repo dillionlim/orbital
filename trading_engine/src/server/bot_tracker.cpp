@@ -141,6 +141,29 @@ BotTracker::PauseResult BotTracker::resume(std::string_view client_id, std::stri
     return PauseResult::Ok;
 }
 
+BotTracker::PauseResult BotTracker::remove(std::string_view client_id, std::string_view requesting_user_id) {
+    if (requesting_user_id.empty()) return PauseResult::NotFound;
+    const std::string key = compose_key(requesting_user_id, client_id);
+    std::lock_guard<std::mutex> lk(mu_);
+    auto it = by_key_.find(key);
+    if (it == by_key_.end()) return PauseResult::NotFound;
+    if (it->second.is_internal || it->second.user_id == kMmUserId) return PauseResult::InternalBot;
+    if (it->second.user_id != requesting_user_id) return PauseResult::NotOwner;
+    // Drop the row and all bookkeeping that referenced it.
+    by_key_.erase(it);
+    paused_.erase(key);
+    const std::string uid(requesting_user_id);
+    if (auto uc = user_row_count_.find(uid); uc != user_row_count_.end()) {
+        if (uc->second > 0) --uc->second;
+        if (uc->second == 0) user_row_count_.erase(uc);
+    }
+    if (auto u2c = user_to_client_.find(uid);
+        u2c != user_to_client_.end() && u2c->second == client_id) {
+        user_to_client_.erase(u2c);
+    }
+    return PauseResult::Ok;
+}
+
 bool BotTracker::is_paused(std::string_view user_id, std::string_view client_id) const {
     if (user_id.empty() || client_id.empty()) return false;
     std::lock_guard<std::mutex> lk(mu_);

@@ -138,6 +138,14 @@ std::string RestRouter::handle(std::string_view request) {
         if (client_id.empty()) return http_response(400, "{\"error\":\"missing client_id\"}", "application/json");
         return handle_bot_pause(client_id, request, is_pause);
     }
+    // DELETE /bots/:client_id — forget a (disconnected) bot row, owner-only.
+    if (method == "DELETE" && path.rfind("/bots/", 0) == 0 && path.size() > 6) {
+        std::string p_only{path};
+        if (auto q = p_only.find('?'); q != std::string::npos) p_only.resize(q);
+        std::string client_id = p_only.substr(6);
+        if (client_id.empty()) return http_response(400, "{\"error\":\"missing client_id\"}", "application/json");
+        return handle_bot_remove(client_id, request);
+    }
     // /me/fills must match before the plain /me below.
     if (path.rfind("/me/fills", 0) == 0) {
         return handle_me_fills(path, request);
@@ -444,6 +452,39 @@ std::string RestRouter::handle_bot_pause(std::string_view client_id,
             return http_response(403, "{\"error\":\"not owner\"}", "application/json");
         case BotTracker::PauseResult::InternalBot:
             return http_response(409, "{\"error\":\"cannot pause internal bot\"}", "application/json");
+    }
+    return http_response(500, "{\"error\":\"unreachable\"}", "application/json");
+}
+std::string RestRouter::handle_bot_remove(std::string_view client_id,
+                                          std::string_view request) {
+    std::string apiKey = extractApiKeyFromHttp(request);
+    if (apiKey.empty()) {
+        return http_response(401, "{\"error\":\"missing api key\"}", "application/json");
+    }
+    auto auth_res = auth_.validate(apiKey);
+    if (!auth_res.valid || auth_res.user_id.empty()) {
+        return http_response(401, "{\"error\":\"invalid api key\"}", "application/json");
+    }
+    if (!bots_) {
+        return http_response(503, "{\"error\":\"bot tracker unavailable\"}", "application/json");
+    }
+    // Disconnect first (cancel resting orders + kick any live session) so a
+    // still-connected bot doesn't leave orphaned orders on the book or
+    // immediately re-register the row. Both are no-ops for a disconnected bot.
+    dispatcher_.cancel_orders_for_client(auth_res.user_id, client_id);
+    sessions_.kick_by_client_id(auth_res.user_id, client_id);
+    switch (bots_->remove(client_id, auth_res.user_id)) {
+        case BotTracker::PauseResult::Ok: {
+            std::ostringstream oss;
+            oss << "{\"ok\":true,\"client_id\":\"" << client_id << "\",\"removed\":true}";
+            return http_response(200, oss.str(), "application/json");
+        }
+        case BotTracker::PauseResult::NotFound:
+            return http_response(404, "{\"error\":\"unknown client_id\"}", "application/json");
+        case BotTracker::PauseResult::NotOwner:
+            return http_response(403, "{\"error\":\"not owner\"}", "application/json");
+        case BotTracker::PauseResult::InternalBot:
+            return http_response(409, "{\"error\":\"cannot remove internal bot\"}", "application/json");
     }
     return http_response(500, "{\"error\":\"unreachable\"}", "application/json");
 }

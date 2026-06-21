@@ -51,3 +51,35 @@ export const pauseBot = (server: string, clientId: string, apiKey: string) =>
 
 export const resumeBot = (server: string, clientId: string, apiKey: string) =>
   call(server, clientId, apiKey, 'resume');
+
+// Forget a bot row on the engine (DELETE /bots/:client_id). Owner-only, same as
+// pause. The engine disconnects any live session first, so a stale/disconnected
+// bot is removed cleanly from /bots.
+export async function removeBot(
+  server: string,
+  clientId: string,
+  apiKey: string,
+): Promise<PauseResponse> {
+  try {
+    const res = await fetch(
+      `${httpBase(server)}/bots/${encodeURIComponent(clientId)}`,
+      { method: 'DELETE', headers: { 'Api-Key': apiKey } },
+    );
+    if (res.ok) return { ok: true };
+    let err: PauseError = 'network';
+    if (res.status === 401) err = 'unauthorized';
+    else if (res.status === 403) err = 'not_owner';
+    else if (res.status === 404) err = 'not_found';
+    else if (res.status === 409) err = 'internal_bot';
+    let msg = '';
+    try {
+      const body = await res.json() as { error?: string };
+      msg = body.error || '';
+    } catch {
+      // Ignore body parse failures — status code is enough.
+    }
+    return { ok: false, error: err, message: msg };
+  } catch (e) {
+    return { ok: false, error: 'network', message: e instanceof Error ? e.message : '' };
+  }
+}

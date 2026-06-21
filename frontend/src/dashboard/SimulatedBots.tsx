@@ -1,10 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Card } from '../ui/Card';
-import { Info, Activity, Pause, Play } from 'lucide-react';
+import { Info, Activity, Pause, Play, Trash2 } from 'lucide-react';
 import { useCurrentServer } from '../hooks/useCurrentServer';
 import { useApiKey } from '../hooks/useApiKey';
 import { useEngineUserId } from '../hooks/useEngineUserId';
-import { pauseBot, resumeBot } from '../services/botControl';
+import { pauseBot, resumeBot, removeBot } from '../services/botControl';
 import { httpBase } from '../services/engineUrl';
 
 interface EngineBot {
@@ -98,6 +98,28 @@ export const SimulatedBots: React.FC = () => {
           ? { ...b, paused: !bot.paused, status: !bot.paused ? 'paused' : 'active' }
           : b,
       ));
+    }
+    setBusyId(null);
+  };
+
+  const onRemove = async (bot: EngineBot) => {
+    if (!apiKey) { setActionError('Missing API key'); return; }
+    const id = bot.client_id || bot.user_id;
+    setBusyId(id);
+    setActionError(null);
+    const res = await removeBot(server, id, apiKey);
+    if (!res.ok) {
+      const map: Record<string, string> = {
+        unauthorized: 'Invalid API key',
+        not_owner: 'You can only remove your own bots',
+        not_found: 'Bot not found on engine',
+        internal_bot: 'Internal market maker can\'t be removed',
+        network: 'Network error',
+      };
+      setActionError(map[res.error || 'network'] || 'Failed');
+    } else {
+      // Drop it from the list immediately.
+      setBots(prev => prev.filter(b => (b.client_id || b.user_id) !== id));
     }
     setBusyId(null);
   };
@@ -220,21 +242,33 @@ export const SimulatedBots: React.FC = () => {
                     </td>
                     <td className="px-3 py-2 text-center">
                       {isOwn ? (
-                        <button
-                          type="button"
-                          disabled={busy}
-                          onClick={() => onToggle(bot)}
-                          title={bot.paused ? 'Resume bot' : 'Pause bot'}
-                          className={`inline-flex items-center justify-center w-7 h-7 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
-                            bot.paused
-                              ? 'bg-green-900/40 text-green-300 hover:bg-green-800/60'
-                              : 'bg-yellow-900/40 text-yellow-300 hover:bg-yellow-800/60'
-                          }`}
-                        >
-                          {bot.paused
-                            ? <Play className="w-3.5 h-3.5" />
-                            : <Pause className="w-3.5 h-3.5" />}
-                        </button>
+                        bot.status === 'error' ? (
+                          <button
+                            type="button"
+                            disabled={busy}
+                            onClick={() => onRemove(bot)}
+                            title="Remove disconnected bot"
+                            className="inline-flex items-center justify-center w-7 h-7 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed bg-red-900/40 text-red-300 hover:bg-red-800/60"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            disabled={busy}
+                            onClick={() => onToggle(bot)}
+                            title={bot.paused ? 'Resume bot' : 'Pause bot'}
+                            className={`inline-flex items-center justify-center w-7 h-7 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                              bot.paused
+                                ? 'bg-green-900/40 text-green-300 hover:bg-green-800/60'
+                                : 'bg-yellow-900/40 text-yellow-300 hover:bg-yellow-800/60'
+                            }`}
+                          >
+                            {bot.paused
+                              ? <Play className="w-3.5 h-3.5" />
+                              : <Pause className="w-3.5 h-3.5" />}
+                          </button>
+                        )
                       ) : (
                         <span className="text-slate-700">—</span>
                       )}
