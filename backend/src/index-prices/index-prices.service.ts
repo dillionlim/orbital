@@ -4,6 +4,7 @@ import { firstValueFrom } from 'rxjs';
 import {
   createPriceStore,
   type Daily,
+  type Latest,
   type PriceStore,
   type Sample,
 } from './price-store';
@@ -188,6 +189,7 @@ export class IndexPricesService {
       );
       const prices = res.data?.prices ?? {};
       const now = Date.now();
+      const latestMap: Record<string, Latest> = {};
       await Promise.all(
         INSTRUMENTS.map(async (def) => {
           const price = prices[def.symbol];
@@ -199,15 +201,12 @@ export class IndexPricesService {
             return;
           }
           const open = def.always || this.isMarketOpen(def);
-          await this.store.setLatest(def.symbol, {
-            price,
-            ts: now,
-            open,
-            source: 'engine',
-          });
+          latestMap[def.symbol] = { price, ts: now, open, source: 'engine' };
           await this.store.appendSample(def.symbol, now, price, HISTORY_MS);
         }),
       );
+      // One write for all symbols instead of one per symbol.
+      await this.store.setManyLatest(latestMap);
     } catch (err) {
       this.logger.debug(
         `index-prices: engine fetch failed: ${(err as Error).message}`,
