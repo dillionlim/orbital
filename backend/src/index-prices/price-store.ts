@@ -215,7 +215,23 @@ export class PostgresPriceStore implements PriceStore {
   private schemaReady: Promise<void> | null = null;
 
   constructor(connectionString: string) {
-    this.pool = new Pool({ connectionString, max: 2 });
+    // Serverless-hardened: Vercel freezes the function between invocations, so a
+    // long-lived pooled connection can be dead on the next thaw (pgbouncer has
+    // dropped it). Without timeouts, a query then blocks on the dead socket for
+    // tens of seconds. Recycle idle connections quickly and fail fast.
+    this.pool = new Pool({
+      connectionString,
+      max: 3,
+      idleTimeoutMillis: 10_000,
+      connectionTimeoutMillis: 6_000,
+      query_timeout: 9_000,
+      statement_timeout: 9_000,
+      keepAlive: true,
+      allowExitOnIdle: true,
+    });
+    // A dead idle connection surfaces as a pool 'error' event; swallow it so it
+    // doesn't crash the process — the pool just discards that connection.
+    this.pool.on('error', () => undefined);
   }
 
   private ensureSchema(): Promise<void> {
