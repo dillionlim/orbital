@@ -44,7 +44,7 @@ line in **Performance Analytics**.
 
 ## Running
 
-One at a time (recommended for development — easier to read logs):
+One at a time:
 
 ```bash
 BUBBLES_BOT_NAME=alice uv run taker.py
@@ -53,6 +53,9 @@ BUBBLES_BOT_NAME=alice uv run taker.py
 All at once:
 
 ```bash
+# Run once, to enable execution
+chmod +x ./run_all.sh 
+
 ./run_all.sh
 ```
 

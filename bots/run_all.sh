@@ -48,7 +48,7 @@ pids=()
 trap 'echo; echo "stopping bots…"; kill ${pids[@]} 2>/dev/null || true; wait' INT TERM
 
 BUBBLES_BOT_NAME=taker      uv run taker.py         & pids+=($!)
-# ext-mm covers all three symbols at ±4bps (tighter than the engine MM's
+# ext-mm covers all symbols at ±4bps (tighter than the engine MM's
 # ±10bps). It's the user-side "make money" bot — provided BUBBLES_TAKER_API_KEY
 # is set so the aggressors below run as a different user_id.
 BUBBLES_BOT_NAME=ext-mm     uv run market_maker.py  & pids+=($!)
