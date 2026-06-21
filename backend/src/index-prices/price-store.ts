@@ -1,6 +1,14 @@
 import { Logger } from '@nestjs/common';
 import { Redis } from '@upstash/redis';
-import { Pool } from 'pg';
+
+// Minimal slice of the Prisma client the Postgres store needs. Using the
+// app's managed Prisma connection (rather than a second pg Pool) means the
+// price queries inherit the same serverless-tested connection handling that the
+// auth/users/news queries already rely on — no stale-socket hangs on Vercel.
+export interface SqlClient {
+  $queryRawUnsafe<T = unknown>(query: string, ...values: unknown[]): Promise<T>;
+  $executeRawUnsafe(query: string, ...values: unknown[]): Promise<number>;
+}
 
 // Storage backend for the index-price service. Two implementations:
 //   - RedisPriceStore: Upstash Redis (HTTP) — used when UPSTASH_REDIS_REST_URL
@@ -51,12 +59,13 @@ export interface PriceStore {
   getDaily(sym: string): Promise<Daily | null>;
 }
 
-export function createPriceStore(logger?: Logger): PriceStore {
-  // Prefer Postgres (Supabase): no per-command cap like Upstash's free tier, and
-  // the backend already runs it. Falls back to Upstash, then in-memory.
-  if (process.env.DATABASE_URL) {
-    logger?.log('index-prices: using Postgres store');
-    return new PostgresPriceStore(process.env.DATABASE_URL);
+export function createPriceStore(logger?: Logger, db?: SqlClient): PriceStore {
+  // Prefer Postgres (Supabase) via the app's Prisma connection: no per-command
+  // cap like Upstash's free tier, and it reuses a connection that already
+  // survives Vercel's freeze/thaw. Falls back to Upstash, then in-memory.
+  if (db) {
+    logger?.log('index-prices: using Postgres store (via Prisma)');
+    return new PostgresPriceStore(db);
   }
   const url = process.env.UPSTASH_REDIS_REST_URL;
   const token = process.env.UPSTASH_REDIS_REST_TOKEN;
@@ -64,9 +73,7 @@ export function createPriceStore(logger?: Logger): PriceStore {
     logger?.log('index-prices: using Upstash Redis store');
     return new RedisPriceStore(new Redis({ url, token }));
   }
-  logger?.log(
-    'index-prices: using in-memory store (set DATABASE_URL or UPSTASH_REDIS_REST_*)',
-  );
+  logger?.log('index-prices: using in-memory store');
   return new MemoryPriceStore();
 }
 
@@ -210,53 +217,42 @@ export class RedisPriceStore implements PriceStore {
 // interval.
 
 export class PostgresPriceStore implements PriceStore {
-  private readonly pool: Pool;
   private readonly locks = new Map<string, number>();
   private schemaReady: Promise<void> | null = null;
 
-  constructor(connectionString: string) {
-    // Serverless-hardened: Vercel freezes the function between invocations, so a
-    // long-lived pooled connection can be dead on the next thaw (pgbouncer has
-    // dropped it). Without timeouts, a query then blocks on the dead socket for
-    // tens of seconds. Recycle idle connections quickly and fail fast.
-    this.pool = new Pool({
-      connectionString,
-      max: 3,
-      idleTimeoutMillis: 10_000,
-      connectionTimeoutMillis: 6_000,
-      query_timeout: 9_000,
-      statement_timeout: 9_000,
-      keepAlive: true,
-      allowExitOnIdle: true,
-    });
-    // A dead idle connection surfaces as a pool 'error' event; swallow it so it
-    // doesn't crash the process — the pool just discards that connection.
-    this.pool.on('error', () => undefined);
-  }
+  constructor(private readonly db: SqlClient) {}
 
   private ensureSchema(): Promise<void> {
     if (!this.schemaReady) {
-      this.schemaReady = this.pool
-        .query(
+      this.schemaReady = (async () => {
+        await this.db.$executeRawUnsafe(
           `CREATE TABLE IF NOT EXISTS idx_latest (
              sym text PRIMARY KEY, price double precision NOT NULL,
-             ts bigint NOT NULL, open boolean NOT NULL, source text NOT NULL);
-           CREATE TABLE IF NOT EXISTS idx_sample (
-             sym text NOT NULL, t bigint NOT NULL, p double precision NOT NULL);
-           CREATE INDEX IF NOT EXISTS idx_sample_sym_t ON idx_sample (sym, t);
-           CREATE TABLE IF NOT EXISTS idx_daily (
+             ts bigint NOT NULL, open boolean NOT NULL, source text NOT NULL)`,
+        );
+        await this.db.$executeRawUnsafe(
+          `CREATE TABLE IF NOT EXISTS idx_sample (
+             sym text NOT NULL, t bigint NOT NULL, p double precision NOT NULL)`,
+        );
+        await this.db.$executeRawUnsafe(
+          `CREATE INDEX IF NOT EXISTS idx_sample_sym_t ON idx_sample (sym, t)`,
+        );
+        await this.db.$executeRawUnsafe(
+          `CREATE TABLE IF NOT EXISTS idx_daily (
              sym text PRIMARY KEY, ts bigint NOT NULL,
-             prev_close double precision NOT NULL, series jsonb NOT NULL);`,
-        )
-        .then(() => undefined)
-        .catch((e: unknown) => {
-          this.schemaReady = null; // allow retry on next call
-          throw e;
-        });
+             prev_close double precision NOT NULL, series jsonb NOT NULL)`,
+        );
+      })().catch((e: unknown) => {
+        this.schemaReady = null; // allow retry on next call
+        throw e;
+      });
     }
     return this.schemaReady;
   }
 
+  // In-process throttle (per instance) — a distributed lock isn't worth a round
+  // trip for a low-traffic demo, and each warm instance still fetches at most
+  // once per interval.
   tryAcquireFetch(key: string, intervalMs: number): Promise<boolean> {
     const now = Date.now();
     if (now - (this.locks.get(key) ?? 0) >= intervalMs) {
@@ -280,26 +276,28 @@ export class PostgresPriceStore implements PriceStore {
       values.push(sym, e.price, e.ts, e.open, e.source);
       return `($${b + 1},$${b + 2},$${b + 3},$${b + 4},$${b + 5})`;
     });
-    await this.pool.query(
+    await this.db.$executeRawUnsafe(
       `INSERT INTO idx_latest (sym, price, ts, open, source) VALUES ${rows.join(',')}
        ON CONFLICT (sym) DO UPDATE SET
          price = EXCLUDED.price, ts = EXCLUDED.ts,
          open = EXCLUDED.open, source = EXCLUDED.source`,
-      values,
+      ...values,
     );
   }
 
   async getAllLatest(): Promise<Record<string, Latest>> {
     await this.ensureSchema();
-    const res = await this.pool.query<{
-      sym: string;
-      price: string;
-      ts: string;
-      open: boolean;
-      source: string;
-    }>(`SELECT sym, price, ts, open, source FROM idx_latest`);
+    const rows = await this.db.$queryRawUnsafe<
+      Array<{
+        sym: string;
+        price: number;
+        ts: bigint;
+        open: boolean;
+        source: string;
+      }>
+    >(`SELECT sym, price, ts, open, source FROM idx_latest`);
     const out: Record<string, Latest> = {};
-    for (const r of res.rows) {
+    for (const r of rows) {
       out[r.sym] = {
         price: Number(r.price),
         ts: Number(r.ts),
@@ -317,48 +315,53 @@ export class PostgresPriceStore implements PriceStore {
     windowMs: number,
   ): Promise<void> {
     await this.ensureSchema();
-    await this.pool.query(
+    await this.db.$executeRawUnsafe(
       `INSERT INTO idx_sample (sym, t, p) VALUES ($1, $2, $3)`,
-      [sym, t, p],
+      sym,
+      t,
+      p,
     );
-    await this.pool.query(`DELETE FROM idx_sample WHERE sym = $1 AND t < $2`, [
+    await this.db.$executeRawUnsafe(
+      `DELETE FROM idx_sample WHERE sym = $1 AND t < $2`,
       sym,
       t - windowMs,
-    ]);
+    );
   }
 
   async getWindow(sym: string, sinceMs: number): Promise<Sample[]> {
     await this.ensureSchema();
-    const res = await this.pool.query<{ t: string; p: string }>(
+    const rows = await this.db.$queryRawUnsafe<Array<{ t: bigint; p: number }>>(
       `SELECT t, p FROM idx_sample WHERE sym = $1 AND t >= $2 ORDER BY t`,
-      [sym, sinceMs],
+      sym,
+      sinceMs,
     );
-    return res.rows.map((r) => ({ t: Number(r.t), p: Number(r.p) }));
+    return rows.map((r) => ({ t: Number(r.t), p: Number(r.p) }));
   }
 
   async setDaily(sym: string, d: Daily): Promise<void> {
     await this.ensureSchema();
-    await this.pool.query(
+    await this.db.$executeRawUnsafe(
       `INSERT INTO idx_daily (sym, ts, prev_close, series) VALUES ($1, $2, $3, $4::jsonb)
        ON CONFLICT (sym) DO UPDATE SET
          ts = EXCLUDED.ts, prev_close = EXCLUDED.prev_close, series = EXCLUDED.series`,
-      [sym, d.ts, d.prevClose, JSON.stringify(d.series)],
+      sym,
+      d.ts,
+      d.prevClose,
+      JSON.stringify(d.series),
     );
   }
 
   async getDaily(sym: string): Promise<Daily | null> {
     await this.ensureSchema();
-    const res = await this.pool.query<{
-      ts: string;
-      prev_close: string;
-      series: Sample[];
-    }>(`SELECT ts, prev_close, series FROM idx_daily WHERE sym = $1`, [sym]);
-    if (res.rows.length === 0) return null;
-    const r = res.rows[0];
-    return {
-      ts: Number(r.ts),
-      prevClose: Number(r.prev_close),
-      series: r.series ?? [],
-    };
+    const rows = await this.db.$queryRawUnsafe<
+      Array<{ ts: bigint; prev_close: number; series: Sample[] | string }>
+    >(`SELECT ts, prev_close, series FROM idx_daily WHERE sym = $1`, sym);
+    if (rows.length === 0) return null;
+    const r = rows[0];
+    const series =
+      typeof r.series === 'string'
+        ? (JSON.parse(r.series) as Sample[])
+        : (r.series ?? []);
+    return { ts: Number(r.ts), prevClose: Number(r.prev_close), series };
   }
 }

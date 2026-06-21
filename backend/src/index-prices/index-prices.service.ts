@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
+import { PrismaService } from '../prisma.service';
 import {
   createPriceStore,
   type Daily,
@@ -169,11 +170,15 @@ export class IndexPricesService {
   private readonly store: PriceStore;
   private readonly engineUrl: string;
 
-  constructor(private readonly http: HttpService) {
+  constructor(
+    private readonly http: HttpService,
+    private readonly prisma: PrismaService,
+  ) {
     this.engineUrl = (
       process.env.TRADING_ENGINE_URL ?? 'http://localhost:9090'
     ).replace(/\/+$/, '');
-    this.store = createPriceStore(this.logger);
+    // Back the store with the app's Prisma connection (Supabase Postgres).
+    this.store = createPriceStore(this.logger, this.prisma);
   }
 
   // Top up the live prices + rolling samples from the engine, at most once per
