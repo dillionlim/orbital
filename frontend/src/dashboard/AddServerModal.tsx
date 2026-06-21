@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { X, Save, AlertCircle, CheckCircle, Loader2 } from 'lucide-react';
+import { httpBase } from '../services/engineUrl';
 
 interface AddServerModalProps {
   onClose: () => void;
@@ -13,19 +14,17 @@ export const AddServerModal: React.FC<AddServerModalProps> = ({ onClose, onSave,
   const [healthStatus, setHealthStatus] = useState<'checking' | 'healthy' | 'unhealthy' | null>(null);
   const [errorMessage, setErrorMessage] = useState('');
 
-  const isValidFormat = /^[a-zA-Z0-9.-]+:\d+$/.test(newServerIp.trim());
+  const isValidFormat = /^[a-zA-Z0-9.-]+(:\d+)?$/.test(newServerIp.trim());
 
   const checkHealthcheck = useCallback(async (ip: string): Promise<boolean> => {
     if (!ip.trim()) return false;
     
-    const [host, port] = ip.split(':');
-    const checkPort = port;
     
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 3000);
       
-      const response = await fetch(`http://${host}:${checkPort}/health?_t=${Date.now()}`, {
+      const response = await fetch(`${httpBase(ip)}/health?_t=${Date.now()}`, {
         method: 'GET',
         signal: controller.signal
       });

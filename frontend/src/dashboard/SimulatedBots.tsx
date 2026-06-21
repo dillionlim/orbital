@@ -5,6 +5,7 @@ import { useCurrentServer } from '../hooks/useCurrentServer';
 import { useApiKey } from '../hooks/useApiKey';
 import { useEngineUserId } from '../hooks/useEngineUserId';
 import { pauseBot, resumeBot } from '../services/botControl';
+import { httpBase } from '../services/engineUrl';
 
 interface EngineBot {
   user_id: string;
@@ -52,7 +53,7 @@ export const SimulatedBots: React.FC = () => {
       try {
         const ctrl = new AbortController();
         const t = setTimeout(() => ctrl.abort(), 4000);
-        const res = await fetch(`http://${server}/bots`, { signal: ctrl.signal });
+        const res = await fetch(`${httpBase(server)}/bots`, { signal: ctrl.signal });
         clearTimeout(t);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json() as { bots: EngineBot[] };

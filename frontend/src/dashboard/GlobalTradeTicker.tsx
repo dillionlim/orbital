@@ -5,6 +5,7 @@ import { useEngineStream } from '../hooks/useEngineStream';
 import { useCurrentServer } from '../hooks/useCurrentServer';
 import { useSymbols } from '../services/symbols';
 import type { EngineTradeMessage } from '../services/engineStream';
+import { httpBase } from '../services/engineUrl';
 
 interface EngineTrade {
   trade_id: number;
@@ -84,7 +85,7 @@ export const GlobalTradeTicker: React.FC = () => {
     seededRef.current = true;
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), 4000);
-    fetch(`http://${server}/trades?limit=${MAX_TRADES}`, { signal: ctrl.signal })
+    fetch(`${httpBase(server)}/trades?limit=${MAX_TRADES}`, { signal: ctrl.signal })
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
       .then((data: { trades: EngineTrade[] }) => {
         setTrades((prev) => {
@@ -114,7 +115,7 @@ export const GlobalTradeTicker: React.FC = () => {
       try {
         const ctrl = new AbortController();
         const t = setTimeout(() => ctrl.abort(), 4000);
-        const res = await fetch(`http://${server}/trades?limit=${MAX_TRADES}`, {
+        const res = await fetch(`${httpBase(server)}/trades?limit=${MAX_TRADES}`, {
           signal: ctrl.signal,
         });
         clearTimeout(t);

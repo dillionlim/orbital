@@ -6,6 +6,7 @@ import { useEngineStream } from '../hooks/useEngineStream';
 import { useCurrentServer } from '../hooks/useCurrentServer';
 import { useSymbols } from '../services/symbols';
 import type { EngineBookMessage, EngineBookDeltaMessage } from '../services/engineStream';
+import { httpBase } from '../services/engineUrl';
 
 const REST_FALLBACK_POLL_MS = 1000;
 
@@ -128,7 +129,6 @@ export const OrderBook: React.FC = () => {
   // ---- REST fallback (used only when WS is not open) -----------------------
 
   const fetchOrderBook = useCallback(async () => {
-    const [host, port] = server.split(':');
     const symbolParam = symbol.split('-')[0].toLowerCase();
 
     try {
@@ -141,7 +141,7 @@ export const OrderBook: React.FC = () => {
       // would 401 us — which used to nuke the user's API key and pop a
       // "Re-authenticating…" flash on the dashboard. Skip the auth entirely;
       // there's nothing the key would unlock for this endpoint.
-      const response = await fetch(`http://${host}:${port}/orderbook?symbol=${symbolParam}`, {
+      const response = await fetch(`${httpBase(server)}/orderbook?symbol=${symbolParam}`, {
         method: 'GET',
         headers: { 'Content-Type': 'application/json' },
         signal: controller.signal,

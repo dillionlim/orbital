@@ -3,6 +3,7 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 import { Filter, ChevronDown, Check, Info } from 'lucide-react';
 import { useCurrentServer } from '../hooks/useCurrentServer';
 import { useEngineUserId } from '../hooks/useEngineUserId';
+import { httpBase } from '../services/engineUrl';
 
 interface EngineBot {
   user_id: string;
@@ -133,7 +134,7 @@ export const PnLCharts: React.FC = () => {
         const ctrl = new AbortController();
         const t = setTimeout(() => ctrl.abort(), 4000);
         const res = await fetch(
-          `http://${server}/bots?window_ms=${windowMsRef.current}`,
+          `${httpBase(server)}/bots?window_ms=${windowMsRef.current}`,
           { signal: ctrl.signal },
         );
         clearTimeout(t);
