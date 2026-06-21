@@ -24,8 +24,10 @@ export function useUserSync() {
     inFlight = (async () => {
       try {
         const token = await getToken();
-        const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3010';
-        const response = await fetch(`${backendUrl}/users/sync`, {
+        // Go through the same-origin /api/backend proxy (Next rewrite ->
+        // NEXT_PUBLIC_API_URL) so this works on the hosted frontend without
+        // CORS, and carry the Clerk token the backend's guard requires.
+        const response = await fetch(`/api/backend/users/sync`, {
           method: 'POST',
           headers: {
             'Authorization': `Bearer ${token}`,
