@@ -4,8 +4,19 @@ import { AppModule } from './app.module';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
+  // Localhost for dev; add the deployed frontend origin(s) via FRONTEND_ORIGIN
+  // (comma-separated) when hosting. The engine calls the backend server-side,
+  // so it isn't subject to CORS.
+  const origins = ['http://localhost:3000', 'http://localhost:3001'];
+  if (process.env.FRONTEND_ORIGIN) {
+    origins.push(
+      ...process.env.FRONTEND_ORIGIN.split(',')
+        .map((o) => o.trim())
+        .filter(Boolean),
+    );
+  }
   app.enableCors({
-    origin: ['http://localhost:3000', 'http://localhost:3001'], // Allow both for dev
+    origin: origins,
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
     credentials: true,
   });
@@ -22,6 +33,7 @@ async function bootstrap() {
     );
   }
 
-  await app.listen(3010);
+  // Fly (and most hosts) inject PORT; fall back to 3010 for local dev.
+  await app.listen(process.env.PORT ?? 3010);
 }
 void bootstrap();

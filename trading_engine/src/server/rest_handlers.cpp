@@ -109,6 +109,9 @@ std::string RestRouter::handle(std::string_view request) {
     if (path == "/symbols" || path.rfind("/symbols?", 0) == 0) {
         return handle_symbols();
     }
+    if (path == "/index-prices" || path.rfind("/index-prices?", 0) == 0) {
+        return handle_index_prices();
+    }
     // /trades/historical must match before the /trades prefix below.
     if (path.rfind("/trades/historical", 0) == 0) {
         return handle_historical_trades(path);
@@ -167,6 +170,33 @@ std::string RestRouter::handle_symbols() {
         oss << "}";
     }
     oss << "]}";
+    return http_response(200, oss.str(), "application/json");
+}
+
+std::string RestRouter::handle_index_prices() {
+    // Live prices the engine fetched from the upstream — the authoritative
+    // source the NestJS backend consumes (same wire shape it used to serve:
+    // {prices:{SYM:price}, meta:{SYM:{ts,source}}, ts}).
+    auto snap = index_prices_ ? index_prices_->snapshot()
+                              : std::map<std::string, IndexPriceStore::Entry>{};
+    std::ostringstream oss;
+    oss.precision(12);  // enough for the largest index level without sci-notation
+    oss << "{\"prices\":{";
+    bool first = true;
+    for (const auto& [sym, e] : snap) {
+        if (!first) oss << ",";
+        first = false;
+        oss << "\"" << sym << "\":" << e.price;
+    }
+    oss << "},\"meta\":{";
+    first = true;
+    for (const auto& [sym, e] : snap) {
+        if (!first) oss << ",";
+        first = false;
+        oss << "\"" << sym << "\":{\"ts\":" << e.ts
+            << ",\"source\":\"" << e.source << "\"}";
+    }
+    oss << "},\"ts\":" << now_ms() << "}";
     return http_response(200, oss.str(), "application/json");
 }
 

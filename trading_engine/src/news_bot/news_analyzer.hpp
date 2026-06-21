@@ -53,6 +53,7 @@ private:
     // again next tick rather than giving up).
     std::vector<NewsItem> fetch_news() const;
 
+    std::string backend_url_;      // full URL incl. scheme (for the curl path)
     std::string backend_host_;
     int         backend_port_ = 3010;
     std::shared_ptr<SymbolRegistry> registry_;
