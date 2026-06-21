@@ -1,0 +1,30 @@
+# runs the bubbles trading engine in docker
+# i.e. GEMINI_API_KEY=... docker compose up --build
+
+services:
+  engine:
+    build: ./trading_engine
+    ports:
+      - "9090:9090"
+    # linux needs this mapping for host.docker.internal to resolve to the host
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      # reach the host's backend for API-key validation + news + index prices
+      BUBBLES_BACKEND_URL: "http://host.docker.internal:3010"
+      # optional: enables news-driven (Gemini) trades. noise traders run without it
+      GEMINI_API_KEY: "${GEMINI_API_KEY:-}"
+      # optional: shared secret if the backend enforces X-Engine-Secret
+      BUBBLES_ENGINE_SECRET: "${BUBBLES_ENGINE_SECRET:-}"
+      # optional: live-price fallbacks used only when Yahoo fails for a symbol
+      MASSIVE_API_KEY: "${MASSIVE_API_KEY:-}"
+      TWELVEDATA_API_KEYS: "${TWELVEDATA_API_KEYS:-}"
+    volumes:
+      # config with the news/noise bots enabled + backend_url already set
+      - "./trading_engine/scripts/server.docker.json:/cfg/server.json:ro"
+      # persist SQLite DB across restarts
+      - "engine-data:/data"
+    restart: unless-stopped
+
+volumes:
+  engine-data:

@@ -125,6 +125,14 @@ int main(int argc, char* argv[]) {
     }
     if (!backend_override.empty()) cfg.backend_url = backend_override;
     if (!db_override.empty()) cfg.db_path = db_override;
+    // Env override for the SQLite path, taking precedence over the baked --db so
+    // hosted platforms that can't mount the /data volume (e.g. Koyeb's free
+    // tier) can redirect the DB to a writable path without rebuilding:
+    //   -e BUBBLES_DB_PATH=/tmp/engine.db
+    // Otherwise the engine aborts on "unable to open database file".
+    if (const char* env_db = std::getenv("BUBBLES_DB_PATH")) {
+        if (env_db[0] != '\0') cfg.db_path = env_db;
+    }
     if (no_mm) cfg.market_maker.enabled = false;
 
     LOG_INFO("main: starting trading engine port=" << cfg.port
@@ -215,8 +223,13 @@ int main(int argc, char* argv[]) {
                           bot_tracker, positions);
     dispatcher.start();
 
+    // Shared store of live upstream prices: written by the IndexPriceFeed,
+    // served by the REST /index-prices endpoint. The engine is the source of
+    // truth for these; the NestJS backend consumes the endpoint.
+    auto index_prices = std::make_shared<IndexPriceStore>();
+
     RestRouter rest(cfg.port, metrics, auth, registry, snapshots, trades_cache,
-                    user_fills, bot_tracker, store, sessions, dispatcher);
+                    user_fills, bot_tracker, index_prices, store, sessions, dispatcher);
     WsServer ws(cfg.port, rest, dispatcher, auth, sessions, metrics);
     if (!ws.start()) {
         LOG_ERROR("main: WS server start failed");
@@ -226,9 +239,11 @@ int main(int argc, char* argv[]) {
     MarketMakerBot mm(sequencer, bus, registry, cfg.market_maker);
     mm.start();
 
-    // Live index/ETF anchors: polls the backend and nudges the MM's per-symbol
-    // reference price. Cheap localhost HTTP; no-op for symbols with no feed.
-    IndexPriceFeed index_feed(mm, registry, cfg.backend_url, cfg.index_feed_poll_ms);
+    // Live index/ETF/future prices: the engine fetches them from the upstream
+    // (Yahoo, via curl) itself — it's the source of truth. Tradeable symbols
+    // nudge the MM's per-symbol reference price; all prices land in the shared
+    // store that GET /index-prices serves to the backend.
+    IndexPriceFeed index_feed(mm, registry, index_prices, cfg.index_feed_poll_ms);
     index_feed.start();
 
     // News-analyzer + per-persona news bots. Whole subsystem is opt-in:

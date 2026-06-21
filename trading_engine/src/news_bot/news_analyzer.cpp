@@ -1,15 +1,9 @@
 #include "news_bot/news_analyzer.hpp"
 
-#include <arpa/inet.h>
-#include <netdb.h>
-#include <netinet/in.h>
-#include <sys/socket.h>
-#include <unistd.h>
-
-#include <cstring>
 #include <random>
 #include <sstream>
 
+#include "common/http_fetch.hpp"
 #include "common/log.hpp"
 #include "rapidjson/document.h"
 
@@ -50,7 +44,8 @@ NewsAnalyzer::NewsAnalyzer(std::string backend_url,
       // the URL we build never asks for more than that — saves a
       // round-trip-and-rejection on misconfigured inputs.
       fetch_limit_(fetch_limit <= 0 ? 200 : (fetch_limit > 200 ? 200 : fetch_limit)) {
-    auto [h, p] = parse_backend_url(backend_url);
+    backend_url_ = std::move(backend_url);
+    auto [h, p] = parse_backend_url(backend_url_);
     backend_host_ = h;
     backend_port_ = p;
 
@@ -247,79 +242,17 @@ void NewsAnalyzer::loop() {
 }
 
 std::vector<NewsItem> NewsAnalyzer::fetch_news() const {
-    int sockfd = ::socket(AF_INET, SOCK_STREAM, 0);
-    if (sockfd < 0) return {};
+    // Route through curl so an https:// backend works (the engine links no TLS).
+    // curl also transparently de-chunks the response, so no manual unchunking.
+    std::string base = backend_url_;
+    while (!base.empty() && base.back() == '/') base.pop_back();
+    const std::string url = base + "/news?limit=" + std::to_string(fetch_limit_);
 
-    struct sockaddr_in addr{};
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(backend_port_);
-
-    struct hostent* he = ::gethostbyname(backend_host_.c_str());
-    if (!he) {
-        ::close(sockfd);
-        return {};
-    }
-    std::memcpy(&addr.sin_addr, he->h_addr_list[0], he->h_length);
-
-    if (::connect(sockfd, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) < 0) {
-        ::close(sockfd);
-        return {};
-    }
-
-    std::string req =
-        "GET /news?limit=" + std::to_string(fetch_limit_) + " HTTP/1.1\r\n"
-        "Host: " + backend_host_ + ":" + std::to_string(backend_port_) + "\r\n"
-        "Accept: application/json\r\n"
-        "Connection: close\r\n\r\n";
-    if (::send(sockfd, req.data(), req.size(), 0) < 0) {
-        ::close(sockfd);
-        return {};
-    }
-
-    std::string resp;
-    char buf[4096];
-    while (true) {
-        ssize_t n = ::read(sockfd, buf, sizeof(buf));
-        if (n <= 0) break;
-        resp.append(buf, buf + n);
-        if (resp.size() > (4u << 20)) break;  // 4 MiB safety cap
-    }
-    ::close(sockfd);
-
-    // We don't care about the status code unless it's a 2xx — anything
-    // else means the backend is down or the route changed; treat as no
-    // news rather than spamming logs.
-    if (resp.size() < 12 || resp.compare(0, 9, "HTTP/1.1 ") != 0) return {};
-    if (resp[9] != '2') return {};
-    const auto body_start = resp.find("\r\n\r\n");
-    if (body_start == std::string::npos) return {};
-    const std::string body = resp.substr(body_start + 4);
-
-    // NestJS returns a chunked response by default; strip transfer-encoding
-    // chunking if present. Quick-and-dirty: if the body starts with hex
-    // digits + CRLF, parse chunks.
-    auto unchunk = [&](const std::string& b) -> std::string {
-        // Heuristic: if first line is purely hex digits, treat as chunked.
-        size_t lineEnd = b.find("\r\n");
-        if (lineEnd == std::string::npos) return b;
-        for (size_t i = 0; i < lineEnd; ++i) {
-            if (!std::isxdigit(static_cast<unsigned char>(b[i]))) return b;
-        }
-        std::string out;
-        size_t pos = 0;
-        while (pos < b.size()) {
-            const size_t le = b.find("\r\n", pos);
-            if (le == std::string::npos) break;
-            const size_t sz = std::stoul(b.substr(pos, le - pos), nullptr, 16);
-            if (sz == 0) break;
-            pos = le + 2;
-            if (pos + sz > b.size()) break;
-            out.append(b, pos, sz);
-            pos += sz + 2;
-        }
-        return out;
-    };
-    const std::string json_body = unchunk(body);
+    HttpResponse resp = http_fetch("GET", url, "", {"Accept: application/json"}, 10);
+    // Anything non-2xx means the backend is down or the route changed; treat as
+    // no news rather than spamming logs.
+    if (!resp.ok || resp.status < 200 || resp.status >= 300) return {};
+    const std::string& json_body = resp.body;
 
     rapidjson::Document doc;
     if (doc.Parse(json_body.c_str()).HasParseError() || !doc.IsArray()) return {};

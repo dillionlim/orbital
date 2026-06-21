@@ -1,0 +1,46 @@
+{
+  "server": {
+    "port": 9090,
+    "backend_url": "http://host.docker.internal:3010",
+    "db_path": "/data/engine.db",
+    "auth_cache_ttl_seconds": 300,
+    "index_feed_poll_ms": 1000
+  },
+  "symbols": [
+    { "name": "ES",  "id": 1,  "mid": 7400.0,  "desc": "S&P 500 E-mini future (US large-cap)" },
+    { "name": "NKD", "id": 2,  "mid": 67475.0, "desc": "Nikkei 225 future (Japan)" },
+    { "name": "NQ",  "id": 3,  "mid": 29678.0, "desc": "Nasdaq-100 future (US tech / mega-cap)" },
+    { "name": "YM",  "id": 4,  "mid": 51608.0, "desc": "Dow Jones future (US blue-chip)" },
+    { "name": "RTY", "id": 5,  "mid": 2949.0,  "desc": "Russell 2000 future (US small-cap)" },
+    { "name": "SPY", "id": 6,  "mid": 740.0,   "desc": "S&P 500 ETF (US large-cap)" },
+    { "name": "EWJ", "id": 7,  "mid": 92.0,    "desc": "iShares Japan ETF" },
+    { "name": "EWH", "id": 8,  "mid": 22.0,    "desc": "iShares Hong Kong ETF (HK / China)" },
+    { "name": "EWY", "id": 9,  "mid": 197.0,   "desc": "iShares South Korea ETF" },
+    { "name": "FEZ", "id": 10, "mid": 69.0,    "desc": "Euro Stoxx 50 ETF (eurozone)" }
+  ],
+  "market_maker": {
+    "enabled": true,
+    "size": 10,
+    "refresh_ms": 1000,
+    "track_trades": true,
+    "levels": 8,
+    "requote_drift_bps": 0
+  },
+  "_news_help": [
+    "news/noise bots are ENABLED here (count > 0)",
+    "noise traders run off noise_interval_seconds + a local RNG and need NO Gemini key",
+    "the news-driven (Gemini) analysis only activates when GEMINI_API_KEY is set AND",
+    "the engine can reach the backend (host.docker.internal:3010 via compose)."
+  ],
+  "news": {
+    "poll_seconds": 15,
+    "gemini_model": "gemini-2.5-flash",
+    "gemini_api_key": "",
+    "fetch_limit": 200,
+    "bots": [
+      { "count": 2, "persona": "momentum",   "size_per_signal": 5, "confidence_threshold": 0.6,  "size_jitter_pct": 25, "price_offset_jitter_bps": 15, "noise_interval_seconds": 10, "signal_delay_ms": 4000 },
+      { "count": 1, "persona": "contrarian", "size_per_signal": 3, "confidence_threshold": 0.7,  "size_jitter_pct": 25, "price_offset_jitter_bps": 15, "noise_interval_seconds": 12, "signal_delay_ms": 4000 },
+      { "count": 1, "persona": "scalper",    "size_per_signal": 4, "confidence_threshold": 0.65, "size_jitter_pct": 30, "price_offset_jitter_bps": 8,  "noise_interval_seconds": 20, "signal_delay_ms": 2500 }
+    ]
+  }
+}

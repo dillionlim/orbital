@@ -10,6 +10,7 @@
 #include <cstring>
 #include <regex>
 
+#include "common/http_fetch.hpp"
 #include "common/log.hpp"
 #include "rapidjson/document.h"
 
@@ -103,76 +104,33 @@ void ApiKeyAuthenticator::removeKey(std::string_view apiKey) {
 }
 
 AuthResult ApiKeyAuthenticator::validateWithBackend(std::string_view apiKey) {
-    int sockfd = socket(AF_INET, SOCK_STREAM, 0);
-    if (sockfd < 0) return {false, ""};
+    // Build the validate URL from the configured backend URL, preserving its
+    // scheme so an https:// backend works — the request goes through curl,
+    // which does the TLS the engine doesn't link itself.
+    std::string base = backend_url_;
+    while (!base.empty() && base.back() == '/') base.pop_back();
+    const std::string url = base + "/api-keys/validate";
 
-    struct sockaddr_in addr{};
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(backend_port_);
-
-    // Resolve host (handles "localhost", IPs, and hostnames).
-    struct hostent* he = gethostbyname(backend_host_.c_str());
-    if (!he) {
-        close(sockfd);
-        return {false, ""};
-    }
-    std::memcpy(&addr.sin_addr, he->h_addr_list[0], he->h_length);
-
-    if (connect(sockfd, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
-        close(sockfd);
-        return {false, ""};
-    }
-
-    // POST + body + shared-secret header. Two reasons over the old GET ?key=:
-    //   1. Reverse-proxy and NestJS access logs capture full URLs but never
-    //      bodies, so secrets stop leaking into log files.
-    //   2. The shared secret stops anyone other than this engine from
-    //      hammering /api-keys/validate as a free DB-DoS amplifier.
-    // The shared secret comes from $BUBBLES_ENGINE_SECRET; if unset, we still
-    // try the request — backend will refuse if its own secret is configured,
-    // and dev/local-only setups stay one-step.
+    // POST + body + shared-secret header. The key rides in the body (sent on
+    // stdin by http_fetch) so it never lands in logs or `ps`; the shared secret
+    // ($BUBBLES_ENGINE_SECRET) stops anyone else hammering /api-keys/validate.
+    // If unset we still try — the backend refuses if its own secret is set.
     const char* shared = std::getenv("BUBBLES_ENGINE_SECRET");
     const std::string secret = shared ? shared : "";
     const std::string req_body = std::string("{\"key\":\"") + std::string(apiKey) + "\"}";
-    std::string req = "POST /api-keys/validate HTTP/1.1\r\n";
-    req += "Host: " + backend_host_ + ":" + std::to_string(backend_port_) + "\r\n";
-    req += "Content-Type: application/json\r\n";
-    req += "Content-Length: " + std::to_string(req_body.size()) + "\r\n";
-    if (!secret.empty()) req += "X-Engine-Secret: " + secret + "\r\n";
-    req += "Connection: close\r\n\r\n";
-    req += req_body;
-    if (::send(sockfd, req.data(), req.size(), 0) < 0) {
-        close(sockfd);
-        return {false, ""};
-    }
+    std::vector<std::string> headers = {"Content-Type: application/json"};
+    if (!secret.empty()) headers.push_back("X-Engine-Secret: " + secret);
 
-    std::string resp;
-    char buf[4096];
-    while (true) {
-        ssize_t n = read(sockfd, buf, sizeof(buf));
-        if (n <= 0) break;
-        resp.append(buf, buf + n);
-        if (resp.size() > 1 << 20) break;  // 1 MiB cap
-    }
-    close(sockfd);
-
-    // Accept any 2xx status. NestJS returns 201 Created on POST routes by
-    // default, so a hardcoded "200 OK" check would treat every key as
-    // invalid (which is exactly the bug that was making /me return 401
-    // for valid keys after the GET→POST validate switch).
-    if (resp.size() < 12 || resp.compare(0, 9, "HTTP/1.1 ") != 0) return {false, ""};
-    if (resp[9] != '2') return {false, ""};
-
-    // Skip headers, parse JSON body.
-    auto body_start = resp.find("\r\n\r\n");
-    if (body_start == std::string::npos) return {false, ""};
-    std::string body = resp.substr(body_start + 4);
+    HttpResponse resp = http_fetch("POST", url, req_body, headers, 5);
+    if (!resp.ok) return {false, ""};
+    // Accept any 2xx (NestJS returns 201 on POST routes by default).
+    if (resp.status < 200 || resp.status >= 300) return {false, ""};
 
     rapidjson::Document doc;
-    if (doc.Parse(body.c_str()).HasParseError() || !doc.IsObject()) {
+    if (doc.Parse(resp.body.c_str()).HasParseError() || !doc.IsObject()) {
         // Fall back to substring detection (matches old behavior).
-        bool valid = body.find("\"valid\":true") != std::string::npos ||
-                     body.find("\"valid\": true") != std::string::npos;
+        bool valid = resp.body.find("\"valid\":true") != std::string::npos ||
+                     resp.body.find("\"valid\": true") != std::string::npos;
         return {valid, ""};
     }
 

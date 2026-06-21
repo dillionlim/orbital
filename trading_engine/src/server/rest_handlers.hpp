@@ -5,6 +5,7 @@
 
 #include "auth/api_key_authenticator.hpp"
 #include "common/config.hpp"
+#include "feed/index_price_store.hpp"
 #include "persistence/sqlite_store.hpp"
 #include "server/bot_tracker.hpp"
 #include "server/dispatcher.hpp"
@@ -27,13 +28,14 @@ public:
                std::shared_ptr<RecentTradesCache> trades,
                std::shared_ptr<UserFillsCache> user_fills,
                std::shared_ptr<BotTracker> bots,
+               std::shared_ptr<IndexPriceStore> index_prices,
                SqliteStore& store, SessionRegistry& sessions,
                Dispatcher& dispatcher)
         : port_(port), metrics_(metrics), auth_(auth),
           registry_(std::move(registry)), snapshots_(std::move(snapshots)),
           trades_(std::move(trades)), user_fills_(std::move(user_fills)),
-          bots_(std::move(bots)), store_(store),
-          sessions_(sessions), dispatcher_(dispatcher) {}
+          bots_(std::move(bots)), index_prices_(std::move(index_prices)),
+          store_(store), sessions_(sessions), dispatcher_(dispatcher) {}
 
     // Returns the full HTTP response text. `request` is the raw request (headers+body).
     [[nodiscard]] std::string handle(std::string_view request);
@@ -45,6 +47,7 @@ private:
     [[nodiscard]] std::string handle_trades(std::string_view path);
     [[nodiscard]] std::string handle_historical_trades(std::string_view path);
     [[nodiscard]] std::string handle_bots(std::string_view path);
+    [[nodiscard]] std::string handle_index_prices();
     [[nodiscard]] std::string handle_me(std::string_view request);
     [[nodiscard]] std::string handle_me_fills(std::string_view path, std::string_view request);
     // pause==true → POST /bots/:client_id/pause; false → /resume.
@@ -59,6 +62,7 @@ private:
     std::shared_ptr<RecentTradesCache> trades_;
     std::shared_ptr<UserFillsCache> user_fills_;
     std::shared_ptr<BotTracker> bots_;
+    std::shared_ptr<IndexPriceStore> index_prices_;
     SqliteStore& store_;
     SessionRegistry& sessions_;
     Dispatcher& dispatcher_;
