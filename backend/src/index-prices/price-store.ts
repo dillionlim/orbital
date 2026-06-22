@@ -1,5 +1,4 @@
 import { Logger } from '@nestjs/common';
-import { Redis } from '@upstash/redis';
 
 // Minimal slice of the Prisma client the Postgres store needs. Using the
 // app's managed Prisma connection (rather than a second pg Pool) means the
@@ -9,17 +8,6 @@ export interface SqlClient {
   $queryRawUnsafe<T = unknown>(query: string, ...values: unknown[]): Promise<T>;
   $executeRawUnsafe(query: string, ...values: unknown[]): Promise<number>;
 }
-
-// Storage backend for the index-price service. Two implementations:
-//   - RedisPriceStore: Upstash Redis (HTTP) — used when UPSTASH_REDIS_REST_URL
-//     + UPSTASH_REDIS_REST_TOKEN are set. Required on Vercel, where the function
-//     keeps no state between invocations.
-//   - MemoryPriceStore: in-process maps — used for local dev / always-on hosts
-//     with no Upstash configured.
-//
-// The service samples prices *pull-through on read* (no background timers), so
-// either backend works the same way; only persistence across invocations
-// differs.
 
 export interface Sample {
   t: number;
@@ -60,18 +48,11 @@ export interface PriceStore {
 }
 
 export function createPriceStore(logger?: Logger, db?: SqlClient): PriceStore {
-  // Prefer Postgres (Supabase) via the app's Prisma connection: no per-command
-  // cap like Upstash's free tier, and it reuses a connection that already
-  // survives Vercel's freeze/thaw. Falls back to Upstash, then in-memory.
+  // Prefer Postgres (Supabase) via the app's Prisma connection. 
+  // Falls back to in-memory.
   if (db) {
     logger?.log('index-prices: using Postgres store (via Prisma)');
     return new PostgresPriceStore(db);
-  }
-  const url = process.env.UPSTASH_REDIS_REST_URL;
-  const token = process.env.UPSTASH_REDIS_REST_TOKEN;
-  if (url && token) {
-    logger?.log('index-prices: using Upstash Redis store');
-    return new RedisPriceStore(new Redis({ url, token }));
   }
   logger?.log('index-prices: using in-memory store');
   return new MemoryPriceStore();
@@ -137,74 +118,6 @@ export class MemoryPriceStore implements PriceStore {
 
   getDaily(sym: string): Promise<Daily | null> {
     return Promise.resolve(this.daily.get(sym) ?? null);
-  }
-}
-
-// --- Upstash Redis (serverless / Vercel) ---------------------------------
-
-const LATEST_KEY = 'idx:latest';
-
-export class RedisPriceStore implements PriceStore {
-  constructor(private readonly redis: Redis) {}
-
-  async tryAcquireFetch(key: string, intervalMs: number): Promise<boolean> {
-    // SET NX PX acts as a short-lived lock: the first caller wins, the rest get
-    // null until it expires.
-    const res = await this.redis.set(`idx:lock:${key}`, '1', {
-      nx: true,
-      px: intervalMs,
-    });
-    return res === 'OK';
-  }
-
-  async setLatest(sym: string, e: Latest): Promise<void> {
-    await this.redis.hset(LATEST_KEY, { [sym]: e });
-  }
-
-  async setManyLatest(map: Record<string, Latest>): Promise<void> {
-    if (Object.keys(map).length === 0) return;
-    await this.redis.hset(LATEST_KEY, map);
-  }
-
-  async getAllLatest(): Promise<Record<string, Latest>> {
-    const all = await this.redis.hgetall<Record<string, Latest>>(LATEST_KEY);
-    return all ?? {};
-  }
-
-  async appendSample(
-    sym: string,
-    t: number,
-    p: number,
-    windowMs: number,
-  ): Promise<void> {
-    const key = `idx:hist:${sym}`;
-    await this.redis.zadd(key, { score: t, member: `${t}:${p}` });
-    await this.redis.zremrangebyscore(key, 0, t - windowMs);
-    // Self-clean abandoned symbols.
-    await this.redis.expire(key, Math.ceil(windowMs / 1000) + 60);
-  }
-
-  async getWindow(sym: string, sinceMs: number): Promise<Sample[]> {
-    const members = await this.redis.zrange<string[]>(
-      `idx:hist:${sym}`,
-      sinceMs,
-      '+inf',
-      { byScore: true },
-    );
-    return members
-      .map((m) => {
-        const i = m.indexOf(':');
-        return { t: Number(m.slice(0, i)), p: Number(m.slice(i + 1)) };
-      })
-      .filter((s) => Number.isFinite(s.t) && Number.isFinite(s.p));
-  }
-
-  async setDaily(sym: string, d: Daily): Promise<void> {
-    await this.redis.set(`idx:daily:${sym}`, d);
-  }
-
-  async getDaily(sym: string): Promise<Daily | null> {
-    return (await this.redis.get<Daily>(`idx:daily:${sym}`)) ?? null;
   }
 }
 

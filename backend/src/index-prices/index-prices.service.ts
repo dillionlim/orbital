@@ -160,10 +160,6 @@ function downsample(arr: Sample[], max: number): Sample[] {
   return out;
 }
 
-// Stateless on Vercel: live prices come from the trading engine and are sampled
-// *pull-through on read* into the PriceStore (Upstash Redis in prod, in-memory
-// for local dev). No background timers — each read tops up the samples, gated
-// by a short lock so a burst of reads triggers one engine fetch.
 @Injectable()
 export class IndexPricesService {
   private readonly logger = new Logger(IndexPricesService.name);

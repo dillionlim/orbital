@@ -6,7 +6,7 @@ import { MemoryPriceStore, type Sample } from './price-store';
 
 const WINDOW = 11 * 60 * 1000;
 
-// Reach the in-memory store the service builds when UPSTASH_REDIS_REST_* is unset.
+// Use in-memory store the service builds .
 function storeOf(service: IndexPricesService): MemoryPriceStore {
   return (service as unknown as { store: MemoryPriceStore }).store;
 }
