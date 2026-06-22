@@ -271,7 +271,7 @@ export const Header: React.FC = () => {
                 </Link>
                 <button
                   type="button"
-                  onClick={() => { setIsUserMenuOpen(false); signOut(); }}
+                  onClick={() => { setIsUserMenuOpen(false); void signOut({ redirectUrl: '/' }); }}
                   className="w-full flex items-center gap-2 px-3 py-2 text-sm text-slate-300 hover:bg-slate-700/60 hover:text-red-400 transition-colors"
                   role="menuitem"
                 >

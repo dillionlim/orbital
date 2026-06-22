@@ -25,7 +25,11 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <ClerkProvider>
+    // afterSignOutUrl pins the post-logout redirect to this app's landing page
+    // on whatever domain it's deployed to. Without it Clerk falls back to its
+    // dashboard-configured URL (often localhost for a dev instance), which is
+    // the deployed "logout sends me to the wrong place" bug.
+    <ClerkProvider afterSignOutUrl="/">
       <html lang="en">
         <body
           className={`${geistSans.variable} ${geistMono.variable} antialiased`}
