@@ -1,6 +1,7 @@
-import { Controller, Post, UseGuards, Req } from '@nestjs/common';
+import { Controller, Post, UseGuards, Req, Logger } from '@nestjs/common';
 import { UsersService } from './users.service';
 import { ClerkAuthGuard } from '../auth/clerk-auth.guard';
+import { clerkClient } from '@clerk/clerk-sdk-node';
 import { Request } from 'express';
 import { User, ApiKey } from '@prisma/client';
 
@@ -23,7 +24,24 @@ interface AuthenticatedRequest extends Request {
 @Controller('users')
 @UseGuards(ClerkAuthGuard)
 export class UsersController {
+  private readonly logger = new Logger(UsersController.name);
+
   constructor(private readonly usersService: UsersService) {}
+
+  // Formally revoke the caller's Clerk session via the Backend API (uses the
+  // secret key). The dashboard calls this on logout because a Clerk *development*
+  // instance can't complete the client-side signOut on a deployed domain — this
+  // invalidates the session token server-side regardless.
+  @Post('logout')
+  async logout(@Req() req: AuthenticatedRequest): Promise<{ revoked: boolean }> {
+    try {
+      await clerkClient.sessions.revokeSession(req.auth.sessionId);
+      return { revoked: true };
+    } catch (err) {
+      this.logger.warn(`session revoke failed: ${(err as Error).message}`);
+      return { revoked: false };
+    }
+  }
 
   @Post('sync')
   async syncUser(

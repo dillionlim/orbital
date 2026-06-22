@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Wifi, WifiOff, LogOut, Plus, User as UserIcon, Menu, ChevronDown } from 'lucide-react';
 import { ConnectionStatus } from '../types';
-import { useClerk, useUser } from '@clerk/nextjs';
+import { useAuth, useClerk, useUser } from '@clerk/nextjs';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { AddServerModal } from './AddServerModal';
@@ -17,6 +17,7 @@ const KEY_SERVERS = 'orbital_servers';
 export const Header: React.FC = () => {
   const { user } = useUser();
   const { signOut } = useClerk();
+  const { getToken } = useAuth();
   const pathname = usePathname();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
@@ -72,7 +73,49 @@ export const Header: React.FC = () => {
       return false;
     }
   };
-  
+
+  // Logout. A Clerk *development* instance can't complete the client-side
+  // signOut FAPI call on a deployed domain ("an unexpected response was received
+  // from the server"), so we (1) formally revoke the session on our backend via
+  // Clerk's Backend API, (2) best-effort local signOut, (3) clear any lingering
+  // Clerk cookies/storage, then (4) hard-navigate to the landing page. The
+  // backend revoke is the real fix; the rest guarantees a clean client state.
+  const handleLogout = async () => {
+    setIsUserMenuOpen(false);
+    try {
+      const token = await getToken();
+      if (token) {
+        await fetch('/api/backend/users/logout', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}` },
+        });
+      }
+    } catch {
+      // ignore — proceed to clear local state regardless
+    }
+    try {
+      await signOut();
+    } catch {
+      // dev-instance FAPI signOut can reject; local state is cleared below
+    }
+    try {
+      document.cookie.split(';').forEach((c) => {
+        const name = c.split('=')[0].trim();
+        if (/^(__session|__client|__clerk)/.test(name)) {
+          for (const scope of ['', `; domain=${location.hostname}`, `; domain=.${location.hostname}`]) {
+            document.cookie = `${name}=; path=/${scope}; expires=Thu, 01 Jan 1970 00:00:00 GMT`;
+          }
+        }
+      });
+      Object.keys(localStorage).forEach((k) => {
+        if (/^(__clerk|clerk)/i.test(k)) localStorage.removeItem(k);
+      });
+    } catch {
+      // ignore storage access errors
+    }
+    window.location.replace('/');
+  };
+
   const toggleConnection = () => {
     if (status === ConnectionStatus.CONNECTED) {
       setStatus(ConnectionStatus.DISCONNECTED);
@@ -271,7 +314,7 @@ export const Header: React.FC = () => {
                 </Link>
                 <button
                   type="button"
-                  onClick={() => { setIsUserMenuOpen(false); void signOut({ redirectUrl: '/' }); }}
+                  onClick={() => void handleLogout()}
                   className="w-full flex items-center gap-2 px-3 py-2 text-sm text-slate-300 hover:bg-slate-700/60 hover:text-red-400 transition-colors"
                   role="menuitem"
                 >
