@@ -14,7 +14,11 @@ export const AddServerModal: React.FC<AddServerModalProps> = ({ onClose, onSave,
   const [healthStatus, setHealthStatus] = useState<'checking' | 'healthy' | 'unhealthy' | null>(null);
   const [errorMessage, setErrorMessage] = useState('');
 
-  const isValidFormat = /^[a-zA-Z0-9.-]+(:\d+)?$/.test(newServerIp.trim());
+  const trimmed = newServerIp.trim();
+  const isValidFormat = /^[a-zA-Z0-9.-]+(:\d+)?$/.test(trimmed);
+  // Already in the server list (e.g. localhost:9090 is the default on local dev).
+  // Surfaced as its own message so Save isn't just silently disabled.
+  const isDuplicate = trimmed.length > 0 && servers.includes(trimmed);
 
   const checkHealthcheck = useCallback(async (ip: string): Promise<boolean> => {
     if (!ip.trim()) return false;
@@ -40,7 +44,7 @@ export const AddServerModal: React.FC<AddServerModalProps> = ({ onClose, onSave,
     // Defer the early-reset state writes into a microtask so they
     // aren't synchronous setState calls in the effect body — avoids
     // react-hooks/set-state-in-effect.
-    if (!newServerIp.trim() || !isValidFormat) {
+    if (!trimmed || !isValidFormat || isDuplicate) {
       queueMicrotask(() => {
         setHealthStatus(null);
         setErrorMessage('');
@@ -67,15 +71,14 @@ export const AddServerModal: React.FC<AddServerModalProps> = ({ onClose, onSave,
     }, 500);
 
     return () => clearTimeout(timer);
-  }, [newServerIp, isValidFormat, checkHealthcheck]);
+  }, [newServerIp, trimmed, isValidFormat, isDuplicate, checkHealthcheck]);
 
   const handleSave = () => {
-    if (!newServerIp.trim() || servers.includes(newServerIp)) return;
-    if (healthStatus !== 'healthy') return;
-    onSave(newServerIp);
+    if (!trimmed || isDuplicate || healthStatus !== 'healthy') return;
+    onSave(trimmed);
   };
 
-  const canSave = newServerIp.trim() && !servers.includes(newServerIp) && healthStatus === 'healthy' && isValidFormat;
+  const canSave = trimmed.length > 0 && !isDuplicate && healthStatus === 'healthy' && isValidFormat;
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
@@ -106,19 +109,25 @@ export const AddServerModal: React.FC<AddServerModalProps> = ({ onClose, onSave,
               'border-slate-700 focus:ring-blue-500'
             }`}
           />
-          {healthStatus === 'checking' && (
+          {isDuplicate && isValidFormat && (
+            <div className="mt-2 flex items-start gap-2 text-amber-400 text-sm">
+              <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+              <span>This server is already in your list — pick it from the server dropdown (top bar) to connect.</span>
+            </div>
+          )}
+          {!isDuplicate && healthStatus === 'checking' && (
             <div className="mt-2 flex items-center gap-2 text-yellow-500 text-sm">
               <Loader2 className="w-4 h-4 animate-spin" />
               <span>Checking server health...</span>
             </div>
           )}
-          {healthStatus === 'unhealthy' && (
+          {!isDuplicate && healthStatus === 'unhealthy' && (
             <div className="mt-2 flex items-start gap-2 text-red-400 text-sm">
               <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
               <span>{errorMessage}</span>
             </div>
           )}
-          {healthStatus === 'healthy' && (
+          {!isDuplicate && healthStatus === 'healthy' && (
             <div className="mt-2 flex items-center gap-2 text-green-400 text-sm">
               <CheckCircle className="w-4 h-4" />
               <span>Server is healthy and ready to connect</span>
