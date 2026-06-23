@@ -19,7 +19,6 @@
     "generate:migration": "npx prisma migrate dev --create-only && ./scripts/copy_down_sql.sh"
   },
   "dependencies": {
-    "@clerk/clerk-sdk-node": "^4.13.23",
     "@nestjs/axios": "^4.0.1",
     "@nestjs/common": "^11.0.0",
     "@nestjs/config": "^4.0.2",
@@ -29,6 +28,7 @@
     "@nestjs/schedule": "^6.1.0",
     "@prisma/adapter-pg": "^7.2.0",
     "@prisma/client": "^7.2.0",
+    "@supabase/supabase-js": "^2.108.2",
     "@types/passport-jwt": "^4.0.1",
     "hyparquet": "^1.26.0",
     "hyparquet-compressors": "^1.1.1",

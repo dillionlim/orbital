@@ -1,6 +1,6 @@
 'use client';
 
-import { useAuth } from '@clerk/nextjs';
+import { useAuth } from '../lib/auth';
 import { useEffect, useRef } from 'react';
 
 // Module-scoped guard: dedupes across hot-reload + React Strict Mode double-mount

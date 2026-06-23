@@ -1,6 +1,6 @@
 import { Controller, Get, UseGuards, Req } from '@nestjs/common';
 import { TradingEngineService } from './trading-engine.service';
-import { ClerkAuthGuard } from '../auth/clerk-auth.guard';
+import { SupabaseAuthGuard } from '../auth/supabase-auth.guard';
 import { Request } from 'express';
 
 interface AuthenticatedRequest extends Request {
@@ -12,7 +12,7 @@ interface AuthenticatedRequest extends Request {
 }
 
 @Controller('trading')
-@UseGuards(ClerkAuthGuard)
+@UseGuards(SupabaseAuthGuard)
 export class TradingController {
   constructor(private readonly tradingService: TradingEngineService) {}
 

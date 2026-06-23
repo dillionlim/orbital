@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { useUser } from "@clerk/nextjs";
+import { useUser } from "../../lib/auth";
 import { Header } from "@/src/dashboard/Header";
 import { GlobalTradeTicker } from "@/src/dashboard/GlobalTradeTicker";
 import { BigTrades } from "@/src/dashboard/BigTrades";

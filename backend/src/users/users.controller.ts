@@ -1,11 +1,10 @@
-import { Controller, Post, UseGuards, Req, Logger } from '@nestjs/common';
+import { Controller, Post, UseGuards, Req } from '@nestjs/common';
 import { UsersService } from './users.service';
-import { ClerkAuthGuard } from '../auth/clerk-auth.guard';
-import { clerkClient } from '@clerk/clerk-sdk-node';
+import { SupabaseAuthGuard } from '../auth/supabase-auth.guard';
 import { Request } from 'express';
 import { User, ApiKey } from '@prisma/client';
 
-interface ClerkClaims {
+interface AuthClaims {
   email?: string;
   username?: string;
   preferred_username?: string;
@@ -17,31 +16,17 @@ interface AuthenticatedRequest extends Request {
   auth: {
     userId: string;
     sessionId: string;
-    claims: ClerkClaims;
+    claims: AuthClaims;
   };
 }
 
 @Controller('users')
-@UseGuards(ClerkAuthGuard)
+@UseGuards(SupabaseAuthGuard)
 export class UsersController {
-  private readonly logger = new Logger(UsersController.name);
-
   constructor(private readonly usersService: UsersService) {}
 
-  // Formally revoke the caller's Clerk session via the Backend API (uses the
-  // secret key). The dashboard calls this on logout because a Clerk *development*
-  // instance can't complete the client-side signOut on a deployed domain — this
-  // invalidates the session token server-side regardless.
-  @Post('logout')
-  async logout(@Req() req: AuthenticatedRequest): Promise<{ revoked: boolean }> {
-    try {
-      await clerkClient.sessions.revokeSession(req.auth.sessionId);
-      return { revoked: true };
-    } catch (err) {
-      this.logger.warn(`session revoke failed: ${(err as Error).message}`);
-      return { revoked: false };
-    }
-  }
+  // Logout is handled entirely client-side with Supabase (supabase.auth.signOut
+  // clears the localStorage session), so there's no server endpoint to revoke.
 
   @Post('sync')
   async syncUser(
@@ -49,7 +34,7 @@ export class UsersController {
   ): Promise<User & { apiKey: ApiKey | null }> {
     const userId = req.auth.userId;
     const claims = req.auth.claims || {};
-    const email = claims.email || `user_${userId}@clerk.dev`; // Fallback if email not in claims
+    const email = claims.email || `${userId}@users.noreply`;
     const username = claims.username || claims.preferred_username;
     const firstName = claims.given_name;
     const lastName = claims.family_name;

@@ -12,7 +12,7 @@ import {
   HttpStatus,
 } from '@nestjs/common';
 import { ApiKeyService } from './api-key.service';
-import { ClerkAuthGuard } from '../auth/clerk-auth.guard';
+import { SupabaseAuthGuard } from '../auth/supabase-auth.guard';
 import { Request } from 'express';
 
 interface ClerkClaims {
@@ -34,7 +34,7 @@ export class ApiKeyController {
   constructor(private readonly apiKeyService: ApiKeyService) {}
 
   @Post()
-  @UseGuards(ClerkAuthGuard)
+  @UseGuards(SupabaseAuthGuard)
   async createApiKey(@Req() req: AuthenticatedRequest) {
     const userId = req.auth.userId;
     const email = req.auth.claims?.email || `user_${userId}@clerk.dev`;
@@ -45,7 +45,7 @@ export class ApiKeyController {
   }
 
   @Get()
-  @UseGuards(ClerkAuthGuard)
+  @UseGuards(SupabaseAuthGuard)
   async getApiKeys(@Req() req: AuthenticatedRequest) {
     const userId = req.auth.userId;
     return await this.apiKeyService.getApiKeys(userId);
@@ -76,7 +76,7 @@ export class ApiKeyController {
   }
 
   @Delete(':id')
-  @UseGuards(ClerkAuthGuard)
+  @UseGuards(SupabaseAuthGuard)
   async deleteApiKey(
     @Param('id') id: string,
     @Req() req: AuthenticatedRequest,

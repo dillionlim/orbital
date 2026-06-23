@@ -1,10 +1,10 @@
 import { Module } from '@nestjs/common';
-import { ClerkAuthGuard } from './clerk-auth.guard';
+import { SupabaseAuthGuard } from './supabase-auth.guard';
 import { ConfigModule } from '@nestjs/config';
 
 @Module({
   imports: [ConfigModule],
-  providers: [ClerkAuthGuard],
-  exports: [ClerkAuthGuard],
+  providers: [SupabaseAuthGuard],
+  exports: [SupabaseAuthGuard],
 })
 export class AuthModule {}

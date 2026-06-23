@@ -1,3 +1,5 @@
+import { supabase } from '../lib/supabase';
+
 const API_BASE_URL = '/api/backend';
 
 export interface ApiKey {
@@ -8,16 +10,11 @@ export interface ApiKey {
   createdAt: Date;
 }
 
-// The backend's ClerkAuthGuard reads the Clerk session from the
-// `Authorization: Bearer <token>` header. These calls run outside React, so we
-// reach the active session through Clerk's global rather than a hook.
+// The backend guard reads the Supabase session from the
+// `Authorization: Bearer <token>` header.
 async function authHeaders(): Promise<Record<string, string>> {
-  const clerk = (
-    globalThis as unknown as {
-      Clerk?: { session?: { getToken?: () => Promise<string | null> } };
-    }
-  ).Clerk;
-  const token = await clerk?.session?.getToken?.();
+  const { data } = await supabase.auth.getSession();
+  const token = data.session?.access_token;
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 

@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
-import { ClerkProvider } from "@clerk/nextjs";
+import { AuthProvider } from "../lib/auth";
 import "./globals.css";
 import { UserSyncer } from "../components/UserSyncer";
 
@@ -25,19 +25,15 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    // afterSignOutUrl pins the post-logout redirect to this app's landing page
-    // on whatever domain it's deployed to. Without it Clerk falls back to its
-    // dashboard-configured URL (often localhost for a dev instance), which is
-    // the deployed "logout sends me to the wrong place" bug.
-    <ClerkProvider afterSignOutUrl="/">
-      <html lang="en">
-        <body
-          className={`${geistSans.variable} ${geistMono.variable} antialiased`}
-        >
+    <html lang="en">
+      <body
+        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
+      >
+        <AuthProvider>
           <UserSyncer />
           {children}
-        </body>
-      </html>
-    </ClerkProvider>
+        </AuthProvider>
+      </body>
+    </html>
   );
 }

@@ -1,13 +1,15 @@
 'use client';
 
-import React from 'react';
+import React, { useState } from 'react';
 import { TrendingUp, Shield, Zap, ArrowRight } from 'lucide-react';
-import { SignInButton, useUser } from '@clerk/nextjs';
+import { useUser } from '../lib/auth';
+import { AuthModal } from '../components/AuthModal';
 import Link from 'next/link';
 import BubblesIcon from '../ui/BubblesIcon';
 
 export default function LandingPage() {
   const { isSignedIn } = useUser();
+  const [authOpen, setAuthOpen] = useState(false);
 
   return (
     <div className="min-h-screen bg-slate-900 text-slate-200 font-sans">
@@ -27,14 +29,13 @@ export default function LandingPage() {
                Dashboard
             </Link>
           ) : (
-            <SignInButton mode="modal">
-              <button
-                type="button"
-                className="text-sm font-medium hover:text-white transition-colors"
-              >
-                Login
-              </button>
-            </SignInButton>
+            <button
+              type="button"
+              onClick={() => setAuthOpen(true)}
+              className="text-sm font-medium hover:text-white transition-colors"
+            >
+              Login
+            </button>
           )}
         </div>
       </nav>
@@ -57,15 +58,14 @@ export default function LandingPage() {
                <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
              </Link>
           ) : (
-            <SignInButton mode="modal">
-              <button
-                type="button"
-                className="group bg-blue-600 hover:bg-blue-500 text-white px-8 py-3 rounded-full font-semibold transition-all flex items-center gap-2 mx-auto shadow-lg shadow-blue-900/20"
-              >
-                Get Started
-                <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
-              </button>
-            </SignInButton>
+            <button
+              type="button"
+              onClick={() => setAuthOpen(true)}
+              className="group bg-blue-600 hover:bg-blue-500 text-white px-8 py-3 rounded-full font-semibold transition-all flex items-center gap-2 mx-auto shadow-lg shadow-blue-900/20"
+            >
+              Get Started
+              <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+            </button>
           )}
         </div>
 
@@ -97,6 +97,8 @@ export default function LandingPage() {
       <footer className="border-t border-slate-800 py-8 text-center text-slate-500">
         &copy; 2025 Bubbles. Built for algorithmic traders.
       </footer>
+
+      <AuthModal open={authOpen} onClose={() => setAuthOpen(false)} />
     </div>
   );
 }

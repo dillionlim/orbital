@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useUser } from '@clerk/nextjs';
+import { useUser } from '../lib/auth';
 import { apiKeysService } from '../services/apiKeys';
 
 const STORAGE_KEY = 'apiKey';

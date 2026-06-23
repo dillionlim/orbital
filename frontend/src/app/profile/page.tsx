@@ -2,7 +2,8 @@
 
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { useUser } from '@clerk/nextjs';
+import { useUser } from '../../lib/auth';
+import { supabase } from '../../lib/supabase';
 import { Header } from '@/src/dashboard/Header';
 import { Key, RefreshCw, CheckCircle, Eye, EyeOff, Pencil, Check, X } from 'lucide-react';
 import { apiKeysService } from '@/src/services/apiKeys';
@@ -13,12 +14,6 @@ interface ApiKey {
   name: string;
   userId: string;
   createdAt: Date;
-}
-
-// Clerk surfaces validation failures as { errors: [{ message, longMessage }] }.
-function clerkError(err: unknown, fallback: string): string {
-  const e = err as { errors?: Array<{ longMessage?: string; message?: string }> };
-  return e?.errors?.[0]?.longMessage || e?.errors?.[0]?.message || fallback;
 }
 
 export default function ProfilePage() {
@@ -33,17 +28,6 @@ export default function ProfilePage() {
   const [usernameDraft, setUsernameDraft] = useState('');
   const [savingUsername, setSavingUsername] = useState(false);
   const [usernameError, setUsernameError] = useState<string | null>(null);
-
-  // --- Email editing (Clerk requires a verification round-trip) ---
-  // stage: 'idle' → show current email; 'enter' → typing a new address;
-  // 'verify' → a code has been sent, awaiting the 6-digit code.
-  const [emailStage, setEmailStage] = useState<'idle' | 'enter' | 'verify'>('idle');
-  const [emailDraft, setEmailDraft] = useState('');
-  const [codeDraft, setCodeDraft] = useState('');
-  const [savingEmail, setSavingEmail] = useState(false);
-  const [emailError, setEmailError] = useState<string | null>(null);
-  // The pending EmailAddressResource between "send code" and "verify".
-  const [pendingEmailId, setPendingEmailId] = useState<string | null>(null);
 
   const toggleVisibility = (key: string) => {
     setVisibleKey((cur) => (cur === key ? null : key));
@@ -64,7 +48,7 @@ export default function ProfilePage() {
     }
   }, [isLoaded, user]);
 
-  // Backstop the route middleware: bounce signed-out visitors off the profile.
+  // Backstop: bounce signed-out visitors off the profile.
   useEffect(() => {
     if (isLoaded && !isSignedIn) router.replace('/');
   }, [isLoaded, isSignedIn, router]);
@@ -98,68 +82,16 @@ export default function ProfilePage() {
     setSavingUsername(true);
     setUsernameError(null);
     try {
-      // user.update() resolves with the updated resource and updates Clerk's
-      // reactive store, so the <span>{user.username}</span> re-renders on its
-      // own. (A follow-up user.reload() is redundant and, if it throws
-      // transiently, would surface a spurious "could not update" error on an
-      // edit that actually persisted — which looked like "it doesn't save".)
-      await user.update({ username: next });
+      // Updates user_metadata; Supabase fires a USER_UPDATED event that our
+      // AuthProvider listens for, so the displayed username re-renders.
+      const { error } = await supabase.auth.updateUser({ data: { username: next } });
+      if (error) throw error;
       setEditingUsername(false);
     } catch (err) {
       console.error('username update failed', err);
-      setUsernameError(clerkError(err, 'Could not update username.'));
+      setUsernameError(err instanceof Error ? err.message : 'Could not update username.');
     } finally {
       setSavingUsername(false);
-    }
-  };
-
-  // --- Email handlers ---
-  const resetEmail = () => {
-    setEmailStage('idle');
-    setEmailDraft('');
-    setCodeDraft('');
-    setPendingEmailId(null);
-    setEmailError(null);
-  };
-
-  const sendEmailCode = async () => {
-    if (!user) return;
-    const next = emailDraft.trim();
-    if (!next) return;
-    setSavingEmail(true);
-    setEmailError(null);
-    try {
-      const created = await user.createEmailAddress({ email: next });
-      await created.prepareVerification({ strategy: 'email_code' });
-      setPendingEmailId(created.id);
-      setEmailStage('verify');
-    } catch (err) {
-      console.error('email add/verify-start failed', err);
-      setEmailError(clerkError(err, 'Could not start email verification.'));
-    } finally {
-      setSavingEmail(false);
-    }
-  };
-
-  const verifyEmailCode = async () => {
-    if (!user || !pendingEmailId) return;
-    const code = codeDraft.trim();
-    if (!code) return;
-    setSavingEmail(true);
-    setEmailError(null);
-    try {
-      const target = user.emailAddresses.find((e) => e.id === pendingEmailId);
-      if (!target) throw new Error('pending email vanished');
-      await target.attemptVerification({ code });
-      // Promote the freshly verified address to primary. update() refreshes the
-      // reactive store, so the displayed primary email updates without reload().
-      await user.update({ primaryEmailAddressId: target.id });
-      resetEmail();
-    } catch (err) {
-      console.error('email verification failed', err);
-      setEmailError(clerkError(err, 'Incorrect or expired code.'));
-    } finally {
-      setSavingEmail(false);
     }
   };
 
@@ -236,75 +168,14 @@ export default function ProfilePage() {
                   {usernameError && <p className="text-xs text-red-400 mt-1">{usernameError}</p>}
                 </div>
 
-                {/* Email */}
+                {/* Email (read-only — changing it is a Supabase email-confirmation flow) */}
                 <div>
                   <label className="block text-xs text-slate-400 mb-1">Email Address</label>
-                  {emailStage === 'idle' && (
-                    <div className={`${fieldBox} flex items-center justify-between group`}>
-                      <span className={user?.primaryEmailAddress?.emailAddress ? 'text-white' : 'text-slate-400'}>
-                        {user?.primaryEmailAddress?.emailAddress ?? '-'}
-                      </span>
-                      <button
-                        onClick={() => { setEmailDraft(''); setEmailError(null); setEmailStage('enter'); }}
-                        className="text-slate-500 hover:text-white"
-                        title="Change email"
-                      >
-                        <Pencil className="w-4 h-4" />
-                      </button>
-                    </div>
-                  )}
-                  {emailStage === 'enter' && (
-                    <div className="flex items-center gap-2">
-                      <input
-                        autoFocus
-                        type="email"
-                        className={inputCls}
-                        value={emailDraft}
-                        placeholder="you@example.com"
-                        disabled={savingEmail}
-                        onChange={(e) => setEmailDraft(e.target.value)}
-                        onKeyDown={(e) => { if (e.key === 'Enter') sendEmailCode(); if (e.key === 'Escape') resetEmail(); }}
-                      />
-                      <button
-                        onClick={sendEmailCode}
-                        disabled={savingEmail || !emailDraft.trim()}
-                        className={`${iconBtn} bg-blue-600 hover:bg-blue-500 text-white whitespace-nowrap px-3 text-xs font-bold`}
-                      >
-                        {savingEmail ? <RefreshCw className="w-4 h-4 animate-spin" /> : 'Send code'}
-                      </button>
-                      <button onClick={resetEmail} disabled={savingEmail} className={`${iconBtn} bg-slate-700 hover:bg-slate-600 text-white`} title="Cancel">
-                        <X className="w-4 h-4" />
-                      </button>
-                    </div>
-                  )}
-                  {emailStage === 'verify' && (
-                    <div className="flex items-center gap-2">
-                      <input
-                        autoFocus
-                        inputMode="numeric"
-                        className={inputCls}
-                        value={codeDraft}
-                        placeholder="6-digit code"
-                        disabled={savingEmail}
-                        onChange={(e) => setCodeDraft(e.target.value)}
-                        onKeyDown={(e) => { if (e.key === 'Enter') verifyEmailCode(); if (e.key === 'Escape') resetEmail(); }}
-                      />
-                      <button
-                        onClick={verifyEmailCode}
-                        disabled={savingEmail || !codeDraft.trim()}
-                        className={`${iconBtn} bg-blue-600 hover:bg-blue-500 text-white whitespace-nowrap px-3 text-xs font-bold`}
-                      >
-                        {savingEmail ? <RefreshCw className="w-4 h-4 animate-spin" /> : 'Verify'}
-                      </button>
-                      <button onClick={resetEmail} disabled={savingEmail} className={`${iconBtn} bg-slate-700 hover:bg-slate-600 text-white`} title="Cancel">
-                        <X className="w-4 h-4" />
-                      </button>
-                    </div>
-                  )}
-                  {emailStage === 'verify' && !emailError && (
-                    <p className="text-xs text-slate-500 mt-1">We sent a code to {emailDraft}. Enter it to confirm.</p>
-                  )}
-                  {emailError && <p className="text-xs text-red-400 mt-1">{emailError}</p>}
+                  <div className={`${fieldBox} flex items-center justify-between`}>
+                    <span className={user?.primaryEmailAddress?.emailAddress ? 'text-white' : 'text-slate-400'}>
+                      {user?.primaryEmailAddress?.emailAddress ?? '-'}
+                    </span>
+                  </div>
                 </div>
               </div>
             </section>
