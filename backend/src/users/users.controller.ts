@@ -1,4 +1,4 @@
-import { Controller, Post, UseGuards, Req } from '@nestjs/common';
+import { Controller, Post, UseGuards, Req, Body } from '@nestjs/common';
 import { UsersService } from './users.service';
 import { SupabaseAuthGuard } from '../auth/supabase-auth.guard';
 import { Request } from 'express';
@@ -27,6 +27,17 @@ export class UsersController {
 
   // Logout is handled entirely client-side with Supabase (supabase.auth.signOut
   // clears the localStorage session), so there's no server endpoint to revoke.
+
+  // Map user ids -> usernames for the leaderboard (engine returns ids; the
+  // dashboard joins them to names here). Username only — no other profile data.
+  @Post('names')
+  async names(
+    @Body() body: { ids?: string[] },
+  ): Promise<Record<string, string>> {
+    return this.usersService.getUsernames(
+      Array.isArray(body?.ids) ? body.ids.slice(0, 500) : [],
+    );
+  }
 
   @Post('sync')
   async syncUser(

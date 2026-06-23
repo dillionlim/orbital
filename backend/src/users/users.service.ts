@@ -81,4 +81,17 @@ export class UsersService {
 
     return user;
   }
+
+  // Map a set of user ids -> display username, for the leaderboard. Returns only
+  // the username (no other profile detail).
+  async getUsernames(ids: string[]): Promise<Record<string, string>> {
+    if (!ids.length) return {};
+    const users = await this.prisma.user.findMany({
+      where: { clerkId: { in: ids } },
+      select: { clerkId: true, username: true },
+    });
+    const out: Record<string, string> = {};
+    for (const u of users) out[u.clerkId] = u.username ?? '';
+    return out;
+  }
 }

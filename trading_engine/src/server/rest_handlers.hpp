@@ -48,6 +48,8 @@ private:
     [[nodiscard]] std::string handle_historical_trades(std::string_view path);
     [[nodiscard]] std::string handle_bots(std::string_view path,
                                           std::string_view request);
+    // Aggregate PnL per user (no per-bot detail) for the public leaderboard.
+    [[nodiscard]] std::string handle_leaderboard();
     [[nodiscard]] std::string handle_index_prices();
     [[nodiscard]] std::string handle_me(std::string_view request);
     [[nodiscard]] std::string handle_me_fills(std::string_view path, std::string_view request);

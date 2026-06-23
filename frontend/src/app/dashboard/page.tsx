@@ -13,6 +13,7 @@ import { ReturnsChart } from "@/src/dashboard/ReturnsChart";
 import { PnLCharts } from "@/src/dashboard/PnLCharts";
 import { NewsFeed } from "@/src/dashboard/NewsFeed";
 import { SimulatedBots } from "@/src/dashboard/SimulatedBots";
+import { Leaderboard } from "@/src/dashboard/Leaderboard";
 import { Backtester } from "@/src/dashboard/Backtester";
 
 export default function Dashboard() {
@@ -41,8 +42,9 @@ export default function Dashboard() {
           <IndicesPanel />
         </div>
         
-        <div className="col-span-1 md:col-span-4 lg:col-span-4">
+        <div className="col-span-1 md:col-span-4 lg:col-span-4 space-y-6">
           <SimulatedBots />
+          <Leaderboard />
         </div>
 
         <div className="col-span-1 md:col-span-3 lg:col-span-3">

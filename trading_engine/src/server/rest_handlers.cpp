@@ -122,6 +122,10 @@ std::string RestRouter::handle(std::string_view request) {
     if (path == "/bots" || path.rfind("/bots?", 0) == 0) {
         return handle_bots(path, request);
     }
+    // Public leaderboard: aggregate PnL per user, no per-bot detail.
+    if (path == "/leaderboard" || path.rfind("/leaderboard?", 0) == 0) {
+        return handle_leaderboard();
+    }
     // /bots/:client_id/{pause,resume} — POST, requires API key, owner-only.
     if (path.rfind("/bots/", 0) == 0 &&
         (path.size() > 6) &&
@@ -350,6 +354,47 @@ std::string RestRouter::handle_bots(std::string_view path, std::string_view requ
             << ",\"first_seen\":" << b.first_seen
             << ",\"last_activity\":" << b.last_activity
             << "}";
+    }
+    oss << "]}";
+    return http_response(200, oss.str(), "application/json");
+}
+
+std::string RestRouter::handle_leaderboard() {
+    auto connected = sessions_.connected_client_ids();
+    auto snaps = bots_ ? bots_->snapshot(connected)
+                       : std::vector<BotTracker::BotSnapshot>{};
+    // Aggregate PnL per (human) user — no per-bot detail leaves the engine.
+    struct Agg { double pnl = 0.0; long long fills = 0; long long volume = 0; int bots = 0; };
+    std::unordered_map<std::string, Agg> by_user;
+    for (const auto& b : snaps) {
+        if (b.is_internal) continue;
+        auto& a = by_user[b.user_id];
+        a.pnl += b.total_pnl;
+        a.fills += static_cast<long long>(b.fills);
+        a.volume += static_cast<long long>(b.volume);
+        a.bots += 1;
+    }
+    std::vector<std::pair<std::string, Agg>> rows(by_user.begin(), by_user.end());
+    std::sort(rows.begin(), rows.end(),
+              [](const auto& x, const auto& y) { return x.second.pnl > y.second.pnl; });
+    auto esc = [](const std::string& s) {
+        std::string r;
+        r.reserve(s.size());
+        for (char c : s) {
+            if (c == '"' || c == '\\') { r.push_back('\\'); r.push_back(c); }
+            else if (static_cast<unsigned char>(c) >= 0x20) r.push_back(c);
+        }
+        return r;
+    };
+    std::ostringstream oss;
+    oss << "{\"leaderboard\":[";
+    for (std::size_t i = 0; i < rows.size(); ++i) {
+        if (i) oss << ",";
+        oss << "{\"user_id\":\"" << esc(rows[i].first) << "\""
+            << ",\"total_pnl\":" << rows[i].second.pnl
+            << ",\"fills\":" << rows[i].second.fills
+            << ",\"volume\":" << rows[i].second.volume
+            << ",\"bots\":" << rows[i].second.bots << "}";
     }
     oss << "]}";
     return http_response(200, oss.str(), "application/json");
