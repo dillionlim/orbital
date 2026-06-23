@@ -120,7 +120,7 @@ std::string RestRouter::handle(std::string_view request) {
         return handle_trades(path);
     }
     if (path == "/bots" || path.rfind("/bots?", 0) == 0) {
-        return handle_bots(path);
+        return handle_bots(path, request);
     }
     // /bots/:client_id/{pause,resume} — POST, requires API key, owner-only.
     if (path.rfind("/bots/", 0) == 0 &&
@@ -298,20 +298,29 @@ std::string RestRouter::handle_historical_trades(std::string_view path) {
     return http_response(200, oss.str(), "application/json");
 }
 
-std::string RestRouter::handle_bots(std::string_view path) {
+std::string RestRouter::handle_bots(std::string_view path, std::string_view request) {
     int64_t window_ms = 60 * 60 * 1000;  // default 60min
     std::string w = parse_query_param(path, "window_ms");
     if (!w.empty()) {
         try { window_ms = std::stoll(w); } catch (...) {}
+    }
+    // Caller identity from the API key (if any). /bots shows the internal bots
+    // (the shared market everyone trades against) plus the caller's own bots —
+    // never other users' bots.
+    std::string caller;
+    if (std::string apiKey = extractApiKeyFromHttp(request); !apiKey.empty()) {
+        if (auto auth = auth_.validate(apiKey); auth.valid) caller = auth.user_id;
     }
     auto connected = sessions_.connected_client_ids();
     auto snaps = bots_ ? bots_->snapshot(connected, window_ms)
                        : std::vector<BotTracker::BotSnapshot>{};
     std::ostringstream oss;
     oss << "{\"bots\":[";
-    for (std::size_t i = 0; i < snaps.size(); ++i) {
-        const auto& b = snaps[i];
-        if (i) oss << ",";
+    bool first = true;
+    for (const auto& b : snaps) {
+        if (!b.is_internal && b.user_id != caller) continue;
+        if (!first) oss << ",";
+        first = false;
         // Escape strings minimally — our values are plaintext IDs/labels.
         auto esc = [](const std::string& s) {
             std::string r;

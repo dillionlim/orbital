@@ -3,6 +3,7 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 import { Filter, ChevronDown, Check, Info } from 'lucide-react';
 import { useCurrentServer } from '../hooks/useCurrentServer';
 import { useEngineUserId } from '../hooks/useEngineUserId';
+import { useApiKey } from '../hooks/useApiKey';
 import { httpBase } from '../services/engineUrl';
 
 interface EngineBot {
@@ -104,6 +105,9 @@ export const PnLCharts: React.FC = () => {
   const windowMsRef = useRef<number>(windowMs);
   useEffect(() => { windowMsRef.current = windowMs; }, [windowMs]);
   const server = useCurrentServer();
+  const { apiKey } = useApiKey();
+  const apiKeyRef = useRef(apiKey);
+  useEffect(() => { apiKeyRef.current = apiKey; }, [apiKey]);
   const engineUserId = useEngineUserId();
   // Live engineUserId reference, same trick — `/me` can briefly resolve to
   // null between polls (cache TTL expiry, transient backend blip), and we
@@ -135,7 +139,7 @@ export const PnLCharts: React.FC = () => {
         const t = setTimeout(() => ctrl.abort(), 4000);
         const res = await fetch(
           `${httpBase(server)}/bots?window_ms=${windowMsRef.current}`,
-          { signal: ctrl.signal },
+          { signal: ctrl.signal, headers: apiKeyRef.current ? { 'Api-Key': apiKeyRef.current } : undefined },
         );
         clearTimeout(t);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);

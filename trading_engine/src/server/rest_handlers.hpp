@@ -46,7 +46,8 @@ private:
     [[nodiscard]] std::string handle_symbols();
     [[nodiscard]] std::string handle_trades(std::string_view path);
     [[nodiscard]] std::string handle_historical_trades(std::string_view path);
-    [[nodiscard]] std::string handle_bots(std::string_view path);
+    [[nodiscard]] std::string handle_bots(std::string_view path,
+                                          std::string_view request);
     [[nodiscard]] std::string handle_index_prices();
     [[nodiscard]] std::string handle_me(std::string_view request);
     [[nodiscard]] std::string handle_me_fills(std::string_view path, std::string_view request);

@@ -92,9 +92,10 @@ public:
     // entries whose bot has dropped off as "error" rather than "idle".
     // `window_ms` controls the rolling window for windowed_pnl (clamped
     // 1s..24h server-side). hourly_pnl is always 60min for backward compat.
+    // Non-const: also prunes abandoned external bots (see kPruneTtlMs).
     std::vector<BotSnapshot> snapshot(
         const std::unordered_set<std::string>& connected_client_ids = {},
-        int64_t window_ms = 60 * 60 * 1000) const;
+        int64_t window_ms = 60 * 60 * 1000);
 
 private:
     struct Fill {

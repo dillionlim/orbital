@@ -16,6 +16,9 @@ constexpr int64_t kHourMs = 60 * 60 * 1000;
 // 24h is the longest window we expose; older fills get pruned.
 constexpr int64_t kFillRetentionMs = 24 * 60 * 60 * 1000;
 constexpr int64_t kActiveWindowMs = 30 * 1000;
+// Forget an external bot that's had no live session and no activity for this long
+// so abandoned/disconnected test bots don't pile up in /bots forever.
+constexpr int64_t kPruneTtlMs = 10 * 60 * 1000;
 constexpr const char* kMmUserId = "internal:market_maker";
 
 // Cap distinct client_id rows per user. Without this, a single attacker
@@ -257,13 +260,39 @@ double BotTracker::mark_value(const State& s) const {
 
 std::vector<BotTracker::BotSnapshot> BotTracker::snapshot(
     const std::unordered_set<std::string>& connected_client_ids,
-    int64_t window_ms) const {
+    int64_t window_ms) {
     // Clamp to fill retention so callers can't ask for more history than we keep.
     if (window_ms < 1000) window_ms = 1000;
     if (window_ms > kFillRetentionMs) window_ms = kFillRetentionMs;
     std::vector<BotSnapshot> out;
     Timestamp now = now_ms();
     std::lock_guard<std::mutex> lk(mu_);
+    // Prune abandoned external bots first: no live session, not paused, and idle
+    // past the TTL — so /bots doesn't accumulate stale rows from old test runs.
+    for (auto it = by_key_.begin(); it != by_key_.end();) {
+        const State& s = it->second;
+        const std::string composite = compose_key(
+            s.user_id, s.client_id.empty() ? s.user_id : s.client_id);
+        const bool connected = !s.client_id.empty() &&
+            connected_client_ids.find(composite) != connected_client_ids.end();
+        const bool paused = paused_.find(composite) != paused_.end();
+        if (!s.is_internal && !connected && !paused && s.last_activity > 0 &&
+            (now - s.last_activity) > static_cast<uint64_t>(kPruneTtlMs)) {
+            paused_.erase(composite);
+            if (auto uc = user_row_count_.find(s.user_id);
+                uc != user_row_count_.end()) {
+                if (uc->second > 0) --uc->second;
+                if (uc->second == 0) user_row_count_.erase(uc);
+            }
+            if (auto u2c = user_to_client_.find(s.user_id);
+                u2c != user_to_client_.end() && u2c->second == s.client_id) {
+                user_to_client_.erase(u2c);
+            }
+            it = by_key_.erase(it);
+        } else {
+            ++it;
+        }
+    }
     out.reserve(by_key_.size());
     for (const auto& [_, s] : by_key_) {
         BotSnapshot b;

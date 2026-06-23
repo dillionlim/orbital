@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Card } from '../ui/Card';
 import { Info, Activity, Pause, Play, Trash2 } from 'lucide-react';
 import { useCurrentServer } from '../hooks/useCurrentServer';
@@ -38,6 +38,10 @@ export const SimulatedBots: React.FC = () => {
   const [actionError, setActionError] = useState<string | null>(null);
   const server = useCurrentServer();
   const { apiKey } = useApiKey();
+  // /bots is now scoped to the caller's bots; send the key so the poll (which
+  // closes over a stale value otherwise) always uses the current one.
+  const apiKeyRef = useRef(apiKey);
+  useEffect(() => { apiKeyRef.current = apiKey; }, [apiKey]);
   const engineUserId = useEngineUserId();
 
   // Wipe bot rows when server changes — different engine, different bots.
@@ -53,7 +57,10 @@ export const SimulatedBots: React.FC = () => {
       try {
         const ctrl = new AbortController();
         const t = setTimeout(() => ctrl.abort(), 4000);
-        const res = await fetch(`${httpBase(server)}/bots`, { signal: ctrl.signal });
+        const res = await fetch(`${httpBase(server)}/bots`, {
+          signal: ctrl.signal,
+          headers: apiKeyRef.current ? { 'Api-Key': apiKeyRef.current } : undefined,
+        });
         clearTimeout(t);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json() as { bots: EngineBot[] };
