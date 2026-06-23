@@ -116,7 +116,7 @@ export default function ProfilePage() {
             {/* User Info */}
             <section>
               <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-500 mb-4">Account Details</h2>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="grid grid-cols-1 gap-6">
                 {/* Username */}
                 <div>
                   <label className="block text-xs text-slate-400 mb-1">Username</label>
@@ -166,16 +166,6 @@ export default function ProfilePage() {
                     </div>
                   )}
                   {usernameError && <p className="text-xs text-red-400 mt-1">{usernameError}</p>}
-                </div>
-
-                {/* Email (read-only — changing it is a Supabase email-confirmation flow) */}
-                <div>
-                  <label className="block text-xs text-slate-400 mb-1">Email Address</label>
-                  <div className={`${fieldBox} flex items-center justify-between`}>
-                    <span className={user?.primaryEmailAddress?.emailAddress ? 'text-white' : 'text-slate-400'}>
-                      {user?.primaryEmailAddress?.emailAddress ?? '-'}
-                    </span>
-                  </div>
                 </div>
               </div>
             </section>

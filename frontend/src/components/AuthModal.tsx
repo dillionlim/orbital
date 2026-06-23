@@ -6,6 +6,13 @@ import { supabase } from '../lib/supabase';
 const field =
   'w-full rounded-lg bg-slate-800 border border-slate-700 px-3 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-blue-500';
 
+// Supabase Auth needs an email identifier, but Bubbles is username-only. Map a
+// username to a stable synthetic internal address — the user never sees it.
+function syntheticEmail(username: string): string {
+  const local = username.trim().toLowerCase().replace(/[^a-z0-9._-]/g, '');
+  return `${local}@bubbles.local`;
+}
+
 export function AuthModal({
   open,
   onClose,
@@ -14,11 +21,9 @@ export function AuthModal({
   onClose: () => void;
 }) {
   const [mode, setMode] = useState<'signin' | 'signup'>('signin');
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
   const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
-  const [info, setInfo] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   if (!open) return null;
@@ -26,29 +31,44 @@ export function AuthModal({
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     setError(null);
-    setInfo(null);
+    const name = username.trim();
+    if (!name) {
+      setError('Username is required.');
+      return;
+    }
     setBusy(true);
     try {
+      const email = syntheticEmail(name);
       if (mode === 'signin') {
         const { error } = await supabase.auth.signInWithPassword({
           email,
           password,
         });
-        if (error) throw error;
+        if (error) {
+          throw new Error(
+            /invalid login/i.test(error.message)
+              ? 'Invalid username or password.'
+              : error.message,
+          );
+        }
         onClose();
       } else {
         const { data, error } = await supabase.auth.signUp({
           email,
           password,
-          options: {
-            data: { username: username.trim() || email.split('@')[0] },
-          },
+          options: { data: { username: name } },
         });
-        if (error) throw error;
+        if (error) {
+          throw new Error(
+            /already registered/i.test(error.message)
+              ? 'That username is taken.'
+              : error.message,
+          );
+        }
         if (data.session) {
-          onClose(); // email confirmation disabled -> signed straight in
+          onClose(); // confirm-email off -> signed straight in
         } else {
-          setInfo('Account created. Check your email to confirm, then sign in.');
+          setError('Account created — you can sign in now.');
           setMode('signin');
         }
       }
@@ -72,23 +92,13 @@ export function AuthModal({
           {mode === 'signin' ? 'Sign in to Bubbles' : 'Create your account'}
         </h2>
         <form onSubmit={submit} className="space-y-3">
-          {mode === 'signup' && (
-            <input
-              className={field}
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              placeholder="Username (optional)"
-              autoComplete="username"
-            />
-          )}
           <input
             className={field}
-            type="email"
-            required
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            placeholder="Email"
-            autoComplete="email"
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            placeholder="Username"
+            autoComplete="username"
+            autoFocus
           />
           <input
             className={field}
@@ -101,7 +111,6 @@ export function AuthModal({
             autoComplete={mode === 'signin' ? 'current-password' : 'new-password'}
           />
           {error && <p className="text-sm text-red-400">{error}</p>}
-          {info && <p className="text-sm text-green-400">{info}</p>}
           <button
             type="submit"
             disabled={busy}
@@ -115,7 +124,6 @@ export function AuthModal({
           onClick={() => {
             setMode(mode === 'signin' ? 'signup' : 'signin');
             setError(null);
-            setInfo(null);
           }}
           className="mt-4 w-full text-center text-xs text-slate-400 hover:text-white transition-colors"
         >
