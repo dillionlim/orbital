@@ -15,6 +15,7 @@ describe('AppController', () => {
   });
 
   describe('root', () => {
+    // Confirms the root controller delegates to the app service greeting.
     it('should return "Hello World!"', () => {
       expect(appController.getHello()).toBe('Hello World!');
     });

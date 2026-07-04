@@ -23,4 +23,26 @@ cd backend && npm install && npm run start:dev
 
 # Frontend: NextJS landing page on :3000
 cd frontend && npm install && npm run dev
+
+# Bots
+cd bots && chmod +x ./run_all.sh && ./run_all.sh
+```
+
+## Testing
+
+#### Trading engine 
+
+```bash
+cd trading_engine
+cmake -B /tmp/orbital-engine-tests -S . -DCMAKE_BUILD_TYPE=Debug
+cmake --build /tmp/orbital-engine-tests --target order_book_tests matching_engine_tests -- -j"$(nproc)"
+ctest --test-dir /tmp/orbital-engine-tests --output-on-failure
+```
+
+#### Backend
+
+```
+cd backend
+npm test -- --runInBand
+npm run test:e2e -- --runInBand
 ```

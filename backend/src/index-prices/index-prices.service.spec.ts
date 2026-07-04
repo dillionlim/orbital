@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { HttpService } from '@nestjs/axios';
 import { of } from 'rxjs';
 import { IndexPricesService } from './index-prices.service';
+import { PrismaService } from '../prisma.service';
 import { MemoryPriceStore, type Sample } from './price-store';
 
 const WINDOW = 11 * 60 * 1000;
@@ -26,6 +27,7 @@ describe('IndexPricesService', () => {
       providers: [
         IndexPricesService,
         { provide: HttpService, useValue: { get: httpGet } },
+        { provide: PrismaService, useValue: null },
       ],
     }).compile();
 
@@ -34,6 +36,7 @@ describe('IndexPricesService', () => {
   });
 
   describe('getPrices', () => {
+    // Checks cached latest prices are exposed with their metadata intact.
     it('returns the latest prices + meta from the store', async () => {
       await store.setLatest('ES', {
         price: 7400,
@@ -48,6 +51,7 @@ describe('IndexPricesService', () => {
       expect(out.meta.ES).toEqual({ ts: 111, open: true, source: 'engine' });
     });
 
+    // Covers the empty-cache response shape for price reads.
     it('returns empty maps when nothing is stored', async () => {
       const out = await service.getPrices();
       expect(out.prices).toEqual({});
@@ -56,6 +60,7 @@ describe('IndexPricesService', () => {
   });
 
   describe('pull-through sampling', () => {
+    // Verifies pull-through engine reads update both latest price and samples.
     it('fetches the engine on read and records the price', async () => {
       httpGet.mockReturnValue(of({ data: { prices: { NIKKEI: 38000 } } }));
 
@@ -70,6 +75,7 @@ describe('IndexPricesService', () => {
   });
 
   describe('getIndices', () => {
+    // Ensures the cash-index endpoint excludes futures and ETFs.
     it('returns only the four cash indices', async () => {
       const out = await service.getIndices();
       expect(out.indices.map((i) => i.symbol).sort()).toEqual([
@@ -80,6 +86,7 @@ describe('IndexPricesService', () => {
       ]);
     });
 
+    // Pins daily return math against a seeded previous close.
     it('computes the daily return from the previous close', async () => {
       const now = Date.now();
       await store.setLatest('NIKKEI', {
@@ -96,6 +103,7 @@ describe('IndexPricesService', () => {
       expect(row?.returnDay).toBeCloseTo(0.1);
     });
 
+    // Checks rolling-window return calculation from in-memory samples.
     it('computes the 10-minute return from rolling samples', async () => {
       const now = Date.now();
       await store.appendSample('HSI', now - 60_000, 200, WINDOW);
@@ -107,6 +115,7 @@ describe('IndexPricesService', () => {
       expect(row?.return10m).toBeCloseTo(0.1);
     });
 
+    // Protects chart downsampling so endpoints are preserved.
     it('downsamples the daily series to at most 120 points keeping both ends', async () => {
       const now = Date.now();
       const series: Sample[] = Array.from({ length: 500 }, (_, i) => ({
@@ -123,6 +132,7 @@ describe('IndexPricesService', () => {
       expect(row?.series1d.at(-1)).toEqual({ t: 499, p: 499 });
     });
 
+    // Documents the sparse-data response for indices without prices.
     it('returns null fields when data is missing', async () => {
       const row = (await service.getIndices()).indices.find(
         (i) => i.symbol === 'HSI',
@@ -134,11 +144,13 @@ describe('IndexPricesService', () => {
   });
 
   describe('getReturns', () => {
+    // Ensures the returns endpoint covers the full instrument universe.
     it('returns every tracked instrument', async () => {
       const out = await service.getReturns();
       expect(out.instruments.length).toBe(14);
     });
 
+    // Checks return percentages and series conversion for daily charts.
     it('expresses the daily return as a percent of the previous close', async () => {
       const now = Date.now();
       await store.setLatest('ES', {
@@ -177,6 +189,7 @@ describe('IndexPricesService', () => {
       },
     };
 
+    // Verifies Yahoo candle data is normalized into trade-like rows.
     it('maps bars to trades and resolves the Yahoo ticker', async () => {
       httpGet.mockReturnValue(of(yahoo));
 
@@ -191,6 +204,7 @@ describe('IndexPricesService', () => {
       });
     });
 
+    // Covers defensive defaulting for unsupported candle query params.
     it('clamps an invalid range and interval to defaults', async () => {
       httpGet.mockReturnValue(of(yahoo));
       const out = await service.getCandles('ES', 'bogus', 'bogus');
