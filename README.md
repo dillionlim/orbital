@@ -34,9 +34,9 @@ cd bots && chmod +x ./run_all.sh && ./run_all.sh
 
 ```bash
 cd trading_engine
-cmake -B /tmp/orbital-engine-tests -S . -DCMAKE_BUILD_TYPE=Debug
-cmake --build /tmp/orbital-engine-tests --target order_book_tests matching_engine_tests -- -j"$(nproc)"
-ctest --test-dir /tmp/orbital-engine-tests --output-on-failure
+cmake -B ./build/tests -S . -DCMAKE_BUILD_TYPE=Debug
+cmake --build ./build/tests --target order_book_tests matching_engine_tests -- -j"$(nproc)"
+ctest --test-dir ./build/tests --output-on-failure
 ```
 
 #### Backend
