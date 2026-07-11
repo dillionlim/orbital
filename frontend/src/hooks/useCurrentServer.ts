@@ -10,7 +10,7 @@ import { DEFAULT_SERVER } from '../services/engineUrl';
 // would silently bypass it and reintroduce the cross-server data leak.
 
 const STORAGE_KEY = 'currentServer';
-const EVENT = 'orbital:currentServer';
+const EVENT = 'bubbles:currentServer';
 const FALLBACK_SERVER = DEFAULT_SERVER;
 
 function read(): string {
