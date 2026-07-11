@@ -34,15 +34,39 @@ cd bots && chmod +x ./run_all.sh && ./run_all.sh
 
 ```bash
 cd trading_engine
+
+# Configure project and generates build files
 cmake -B ./build/tests -S . -DCMAKE_BUILD_TYPE=Debug
+
+# Compile and links code
 cmake --build ./build/tests --target order_book_tests matching_engine_tests -- -j"$(nproc)"
+
+# Run tests
 ctest --test-dir ./build/tests --output-on-failure
 ```
 
 #### Backend
 
-```
+```bash
 cd backend
+
+# Run unit tests (in parallel) 
 npm test -- --runInBand
+
+# Run end-to-end tests (in parallel)
 npm run test:e2e -- --runInBand
+
+# Runs type-check
+npm exec tsc -- --noEmit
+```
+
+#### Frontend
+```bash
+cd backend
+
+# Run unit tests (sequentially) 
+npm test 
+
+# Runs type-check
+npm exec tsc -- --noEmit
 ```
