@@ -1,7 +1,7 @@
 {
   "name": "orbital-backend",
   "version": "0.1.0",
-  "description": "Bubbles OMS — NestJS",
+  "description": "Bubbles backend — NestJS",
   "private": true,
   "scripts": {
     "build": "npx prisma generate && nest build",
