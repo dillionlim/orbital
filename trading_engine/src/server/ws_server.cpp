@@ -161,7 +161,7 @@ void WsServer::handle_connection(int sockfd) {
     // Auth precedence on WS upgrade:
     //   1. Authorization / Api-Key headers (used by Python bots; lib.py sets
     //      Api-Key explicitly).
-    //   2. Sec-WebSocket-Protocol: orbital.bearer, <key>  — used by browsers,
+    //   2. Sec-WebSocket-Protocol: engine.bearer, <key>  — used by browsers,
     //      which can't set custom headers on the WebSocket constructor but
     //      CAN pass subprotocol values via `new WebSocket(url, [...])`.
     // The query-string `?api_key=` form was removed (URLs leak to logs).
@@ -170,8 +170,8 @@ void WsServer::handle_connection(int sockfd) {
     if (api_key.empty()) {
         const std::string proto_hdr = get_header(req, "Sec-WebSocket-Protocol");
         if (!proto_hdr.empty()) {
-            // Comma-separated list; we want "orbital.bearer" followed by a key.
-            const std::string sentinel = "orbital.bearer";
+            // Comma-separated list; we want "engine.bearer" followed by a key.
+            const std::string sentinel = "engine.bearer";
             size_t pos = proto_hdr.find(sentinel);
             if (pos != std::string::npos) {
                 size_t after = pos + sentinel.size();

@@ -12,7 +12,7 @@ import BubblesIcon from '../ui/BubblesIcon';
 import { httpBase, DEFAULT_SERVER } from '../services/engineUrl';
 
 const KEY_CURRENT = 'currentServer';
-const KEY_SERVERS = 'orbital_servers';
+const KEY_SERVERS = 'servers';
 
 export const Header: React.FC = () => {
   const { user } = useUser();

@@ -64,3 +64,51 @@ if(CMAKE_BUILD_TYPE STREQUAL "Release")
 else()
     target_compile_options(engine PRIVATE -O0 -g -Wall -Wextra)
 endif()
+
+# ---- Tests ---------------------------------------------------------------
+
+enable_testing()
+
+function(configure_engine_test target)
+    target_include_directories(${target} PRIVATE
+        ${CMAKE_SOURCE_DIR}/include
+        ${CMAKE_SOURCE_DIR}/src
+        ${SQLITE3_INCLUDE_DIR}
+    )
+    target_link_libraries(${target} PRIVATE
+        Threads::Threads
+        ${SQLITE3_LIBRARY}
+        ${CMAKE_DL_LIBS}
+    )
+    if(CMAKE_BUILD_TYPE STREQUAL "Release")
+        target_compile_options(${target} PRIVATE -O3 -Wall -Wextra)
+    else()
+        target_compile_options(${target} PRIVATE -O0 -g -Wall -Wextra)
+    endif()
+endfunction()
+
+function(add_engine_test_case target case_name)
+    add_test(NAME ${target}.${case_name} COMMAND ${target} ${case_name})
+endfunction()
+
+add_executable(order_book_tests EXCLUDE_FROM_ALL
+    tests/order_book_test.cpp
+    src/book/order_book.cpp
+)
+configure_engine_test(order_book_tests)
+add_engine_test_case(order_book_tests rests_limit_orders_by_price_priority)
+add_engine_test_case(order_book_tests matches_crossing_order_at_maker_price)
+add_engine_test_case(order_book_tests rejects_market_order_without_liquidity)
+add_engine_test_case(order_book_tests enforces_cancel_ownership)
+add_engine_test_case(order_book_tests cancels_resting_self_trade_and_keeps_incoming_remainder)
+
+add_executable(matching_engine_tests EXCLUDE_FROM_ALL
+    tests/matching_engine_test.cpp
+    src/book/order_book.cpp
+    src/engine/matching_engine.cpp
+)
+configure_engine_test(matching_engine_tests)
+add_engine_test_case(matching_engine_tests publishes_initial_snapshot_on_start)
+add_engine_test_case(matching_engine_tests rejects_market_order_when_book_is_empty)
+add_engine_test_case(matching_engine_tests emits_ack_fills_trade_print_and_book_delta_for_a_match)
+

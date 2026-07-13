@@ -3,7 +3,7 @@ import { httpBase } from './engineUrl';
 // which `user_id` the engine sees us as. Used to decide which bot rows the
 // signed-in user owns (and therefore which pause/resume buttons to render).
 //
-// The OMS's user_id (Clerk's user object) is *not* what the engine knows —
+// The backend's user_id (Clerk's user object) is *not* what the engine knows —
 // the engine only sees whatever the NestJS backend returned for the API
 // key. So we round-trip through the engine instead of reading Clerk locally.
 

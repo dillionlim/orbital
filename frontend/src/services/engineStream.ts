@@ -4,7 +4,7 @@ import { wsBase } from './engineUrl';
 //
 // Auth: browsers can't set custom headers on the WebSocket constructor, so
 // the API key is passed as a `Sec-WebSocket-Protocol` value
-// (`["orbital.bearer", apiKey]`). The engine reads the second protocol entry
+// (`["engine.bearer", apiKey]`). The engine reads the second protocol entry
 // as the bearer key. This avoids the `?api_key=` query-param leak (URLs
 // end up in proxy logs / dev-tools network panels; subprotocol headers
 // don't, since the browser strips them from the request line).
@@ -179,7 +179,7 @@ class EngineStream {
       // Subprotocol carries the bearer key (see comment at top of file).
       // Browsers Base64-encode subprotocol values, so any well-formed key
       // (sk_live_<32hex>) survives unchanged.
-      ws = new WebSocket(this.url, ['orbital.bearer', this.apiKey]);
+      ws = new WebSocket(this.url, ['engine.bearer', this.apiKey]);
     } catch {
       this.scheduleReconnect();
       return;
