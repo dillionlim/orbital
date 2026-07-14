@@ -81,8 +81,9 @@ export function loadPyodideRuntime(): Promise<PyodideRuntime> {
   return runtimePromise;
 }
 
-const WRAPPER_PY = `
+export const WRAPPER_PY = `
 import json
+import math
 
 _ACTIONS = ('buy', 'sell', 'hold')
 _TYPES = ('market', 'limit', 'ioc')
@@ -140,10 +141,34 @@ class _BacktestStrategy:
                 lim = result.get('limit')
                 if lim is None:
                     raise ValueError(f"a '{t}' order requires a numeric 'limit' price")
-                out['limit'] = float(lim)
+                lim = float(lim)
+                # NaN/inf would make json.dumps emit bare NaN/Infinity, which
+                # JSON.parse rejects — killing the whole run. Drop the limit
+                # instead; the JS runner cancels an order with no usable price.
+                if math.isfinite(lim) and lim > 0:
+                    out['limit'] = lim
             return out
         raise ValueError(f"on_trade returned unexpected value: {result!r}")
 `;
+
+/**
+ * Normalize the wrapper's JSON reply into a signal. Anything unrecognized
+ * degrades (hold / market / no limit) rather than throwing: a bad tick must not
+ * kill the run. A non-finite or non-positive limit is dropped — `runner.ts`
+ * cancels a limit/ioc order whose price is unusable.
+ */
+export function toSignal(raw: string): BacktestSignal {
+  const sig = JSON.parse(raw) as { action?: string; type?: string; limit?: number };
+  const action: BacktestSignal['action'] =
+    sig.action === 'buy' || sig.action === 'sell' ? sig.action : 'hold';
+  const type: BacktestSignal['type'] =
+    sig.type === 'limit' || sig.type === 'ioc' ? sig.type : 'market';
+  const limit =
+    typeof sig.limit === 'number' && Number.isFinite(sig.limit) && sig.limit > 0
+      ? sig.limit
+      : undefined;
+  return { action, type, limit };
+}
 
 /** Compile a user-supplied Python source into a Strategy. */
 export async function compilePythonStrategy(source: string, displayName = 'Custom (Python)'): Promise<Strategy> {
@@ -182,12 +207,7 @@ export async function compilePythonStrategy(source: string, displayName = 'Custo
           step: (t: HistoricalTrade, p: BacktestParams) => string;
         }).step(trade, p);
         // step() returns JSON {action, type, limit?}.
-        const sig = JSON.parse(raw) as { action?: string; type?: string; limit?: number };
-        const action: BacktestSignal['action'] =
-          sig.action === 'buy' || sig.action === 'sell' ? sig.action : 'hold';
-        const type: BacktestSignal['type'] =
-          sig.type === 'limit' || sig.type === 'ioc' ? sig.type : 'market';
-        return { action, type, limit: sig.limit };
+        return toSignal(raw);
       } catch (e) {
         throw new Error(`on_trade() raised at ts=${trade.ts}: ${e instanceof Error ? e.message : String(e)}`);
       }

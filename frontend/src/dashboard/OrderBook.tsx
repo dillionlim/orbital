@@ -7,13 +7,16 @@ import { useCurrentServer } from '../hooks/useCurrentServer';
 import { useSymbols } from '../services/symbols';
 import type { EngineBookMessage, EngineBookDeltaMessage } from '../services/engineStream';
 import { httpBase } from '../services/engineUrl';
+import {
+  DEPTH_LEVELS,
+  applyDelta,
+  applySnapshot,
+  createBookState,
+  takeDepth,
+  toOrders,
+} from './orderBookState';
 
 const REST_FALLBACK_POLL_MS = 1000;
-
-// Only the top of the book is worth showing. The engine publishes every resting
-// level, and the tail is mostly stale far-from-touch orders that push the
-// interesting levels out of view.
-const DEPTH_LEVELS = 8;
 
 interface OrderBookData {
   bids: Order[];
@@ -60,42 +63,22 @@ export const OrderBook: React.FC = () => {
 
   // ---- WebSocket subscription (preferred path) -----------------------------
   //
-  // We maintain price → qty maps locally and apply deltas as they arrive. seq
-  // is monotonic per symbol; on a gap we ask the server for a fresh snapshot
-  // (re-subscribe). Maps live in refs because we need the previous state when
-  // applying a delta — using setBids/setAsks directly would race with React
-  // batching under high-frequency updates.
+  // The book state (snapshot + delta application, seq/gap rules) lives in
+  // ./orderBookState. It sits in a ref because applying a delta needs the
+  // previous state — setBids/setAsks alone would race with React batching
+  // under high-frequency updates.
 
-  const bidsMapRef = useRef<Map<number, number>>(new Map());
-  const asksMapRef = useRef<Map<number, number>>(new Map());
-  const seqRef = useRef<number>(0);
+  const bookRef = useRef(createBookState());
 
   useEffect(() => {
     if (!stream) return;
 
     // Reset state when (re)subscribing to a different symbol.
-    bidsMapRef.current = new Map();
-    asksMapRef.current = new Map();
-    seqRef.current = 0;
+    bookRef.current = createBookState();
 
-    const renderFromMaps = () => {
-      // bids descending (highest price first), asks ascending.
-      const toOrders = (m: Map<number, number>, desc: boolean): Order[] => {
-        const arr = Array.from(m.entries(), ([price, size]) => ({
-          price, size, total: price * size,
-        }));
-        arr.sort((a, b) => desc ? b.price - a.price : a.price - b.price);
-        return arr;
-      };
-      setBids(toOrders(bidsMapRef.current, true));
-      setAsks(toOrders(asksMapRef.current, false));
-    };
-
-    const applyChanges = (m: Map<number, number>, changes: Array<[number, number]>) => {
-      for (const [price, qty] of changes) {
-        if (qty === 0) m.delete(price);
-        else m.set(price, qty);
-      }
+    const renderFromBook = () => {
+      setBids(toOrders(bookRef.current.bids, true));
+      setAsks(toOrders(bookRef.current.asks, false));
     };
 
     const off = stream.subscribe<EngineBookMessage | EngineBookDeltaMessage>(
@@ -103,26 +86,16 @@ export const OrderBook: React.FC = () => {
       symbol,
       (msg) => {
         if (msg.t === 'book') {
-          // Snapshot — replace entire state.
-          bidsMapRef.current = new Map(msg.bids);
-          asksMapRef.current = new Map(msg.asks);
-          seqRef.current = msg.seq;
+          applySnapshot(bookRef.current, msg);
         } else {
-          // Delta. seq must be exactly seq+1 — anything else is a gap and
-          // means we missed a publish; recover by asking for a snapshot.
-          const expected = seqRef.current + 1;
-          if (msg.seq !== expected) {
-            // The very first message after subscribe should be `book`, so a
-            // delta arriving with seqRef=0 is the same gap case (expected=1
-            // but the seq is whatever the engine is at currently).
+          const outcome = applyDelta(bookRef.current, msg);
+          if (outcome === 'stale') return;  // already applied; nothing changed
+          if (outcome === 'gap') {
             stream.resync('book', symbol);
             return;  // wait for the snapshot reply; don't apply this delta
           }
-          applyChanges(bidsMapRef.current, msg.bids);
-          applyChanges(asksMapRef.current, msg.asks);
-          seqRef.current = msg.seq;
         }
-        renderFromMaps();
+        renderFromBook();
         setLastUpdate(String(msg.ts));
         setError(null);
         setIsLoading(false);
@@ -193,8 +166,8 @@ export const OrderBook: React.FC = () => {
     !filter || (ask.price.toString().includes(filter) || ask.size.toString().includes(filter))
   );
 
-  const visibleBids = filteredBids.slice(0, DEPTH_LEVELS);
-  const visibleAsks = filteredAsks.slice(0, DEPTH_LEVELS);
+  const visibleBids = takeDepth(filteredBids);
+  const visibleAsks = takeDepth(filteredAsks);
   const hiddenLevels =
     (filteredBids.length - visibleBids.length) + (filteredAsks.length - visibleAsks.length);
 

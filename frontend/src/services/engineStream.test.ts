@@ -154,4 +154,96 @@ describe('engineStream', () => {
       { t: 'subscribe', channel: 'trades', symbol: 'BTC-USD' },
     ]);
   });
+
+  // The registry's whole point: N widgets on one server share one socket, so a
+  // dashboard with a book + a tape + a chart still opens exactly one connection.
+  it('shares a single socket across consumers of the same server and key', () => {
+    const first = acquireTracked('shared.test:9090', 'sk_live_shared_key');
+    const second = acquireTracked('shared.test:9090', 'sk_live_shared_key');
+
+    expect(second).toBe(first);
+    expect(FakeWebSocket.instances).toHaveLength(1);
+
+    // A different key is a different identity (a re-keyed user must not inherit
+    // the old socket's auth), so it gets its own connection.
+    acquireTracked('shared.test:9090', 'sk_live_other_key');
+    expect(FakeWebSocket.instances).toHaveLength(2);
+  });
+
+  // Refcounting must survive an unbalanced-looking unmount order: the socket only
+  // dies at zero refs, and a later acquire after that opens a fresh one.
+  it('only tears the socket down when the last reference is released', () => {
+    acquireStream('refcount.test:9090', 'sk_live_refcount_key');
+    acquireStream('refcount.test:9090', 'sk_live_refcount_key');
+    const ws = FakeWebSocket.instances[0];
+    ws.open();
+
+    // One consumer unmounts — the other is still watching, so the socket lives.
+    releaseStream('refcount.test:9090', 'sk_live_refcount_key');
+    expect(ws.readyState).toBe(FakeWebSocket.OPEN);
+    expect(FakeWebSocket.instances).toHaveLength(1);
+
+    releaseStream('refcount.test:9090', 'sk_live_refcount_key');
+    expect(ws.readyState).toBe(FakeWebSocket.CLOSED);
+
+    // Over-releasing is a no-op, and the next acquire reconnects from scratch.
+    releaseStream('refcount.test:9090', 'sk_live_refcount_key');
+    acquireTracked('refcount.test:9090', 'sk_live_refcount_key');
+    expect(FakeWebSocket.instances).toHaveLength(2);
+  });
+
+  // Backoff doubles per failed attempt and saturates at MAX_BACKOFF_MS (30s) so a
+  // dead engine can't be hammered forever at 1/s by every open browser tab.
+  it('doubles the reconnect backoff up to the 30s cap', async () => {
+    vi.useFakeTimers();
+    acquireTracked('backoff.test:9090', 'sk_live_backoff_key');
+
+    // Each failed attempt closes without ever opening, so the delay keeps growing:
+    // 1s, 2s, 4s, 8s, 16s, then the 30s cap (not 32s) twice over.
+    for (const delay of [1000, 2000, 4000, 8000, 16000, 30000, 30000]) {
+      const attempts = FakeWebSocket.instances.length;
+      FakeWebSocket.instances[attempts - 1].closeAndNotify();
+
+      // Nothing should reconnect a tick early…
+      await vi.advanceTimersByTimeAsync(delay - 1);
+      expect(FakeWebSocket.instances).toHaveLength(attempts);
+      // …and exactly one new socket lands on the scheduled tick.
+      await vi.advanceTimersByTimeAsync(1);
+      expect(FakeWebSocket.instances).toHaveLength(attempts + 1);
+    }
+
+    // A successful open resets the ladder, so the next drop retries after 1s again.
+    const revived = FakeWebSocket.instances[FakeWebSocket.instances.length - 1];
+    revived.open();
+    revived.closeAndNotify();
+    const attempts = FakeWebSocket.instances.length;
+
+    await vi.advanceTimersByTimeAsync(999);
+    expect(FakeWebSocket.instances).toHaveLength(attempts);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(FakeWebSocket.instances).toHaveLength(attempts + 1);
+  });
+
+  // Unmounting while a reconnect is queued must cancel the timer — otherwise the
+  // socket resurrects itself after the last consumer is gone.
+  it('cancels a pending reconnect when the stream is destroyed', async () => {
+    vi.useFakeTimers();
+    const stream = acquireStream('destroy.test:9090', 'sk_live_destroy_key');
+    const onTrade = vi.fn();
+    stream.subscribe('trades', 'BTC-USD', onTrade);
+
+    const ws = FakeWebSocket.instances[0];
+    ws.open();
+    ws.closeAndNotify(); // reconnect now scheduled for +1000ms
+
+    releaseStream('destroy.test:9090', 'sk_live_destroy_key');
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    expect(stream.getStatus()).toBe('closed');
+
+    // Listeners are dropped too, so a late frame on the dead socket goes nowhere.
+    ws.receive({ t: 'trade', symbol: 'BTC-USD', trade_id: 1, price: 100, quantity: 1, taker_side: 'Buy', ts: 1 });
+    expect(onTrade).not.toHaveBeenCalled();
+  });
 });

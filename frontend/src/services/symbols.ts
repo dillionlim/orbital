@@ -35,7 +35,9 @@ export async function fetchSymbols(server: string): Promise<EngineSymbol[]> {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const j = (await res.json()) as { symbols?: EngineSymbol[] };
       const list = j.symbols ?? [];
-      cache.set(server, list);
+      // Never cache an empty registry: an engine that's still booting answers 200
+      // with no symbols, and caching that would strand every widget on "Loading…".
+      if (list.length > 0) cache.set(server, list);
       return list;
     } finally {
       inflight.delete(server);
