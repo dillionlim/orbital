@@ -1,6 +1,9 @@
 #pragma once
 #include <atomic>
+#include <condition_variable>
+#include <mutex>
 #include <thread>
+#include <unordered_set>
 
 #include "auth/api_key_authenticator.hpp"
 #include "server/dispatcher.hpp"
@@ -27,6 +30,15 @@ private:
     void accept_loop();
     void handle_connection(int sockfd);
     void session_loop(SessionPtr s);
+    void writer_loop(SessionPtr s);
+
+    // Connection threads are detached, so stop() must shut their sockets down (to wake
+    // them out of a blocking read) and then wait for them to leave — otherwise they run
+    // on into a destroyed Dispatcher/Sequencer as main unwinds.
+    void track_conn(int fd);
+    void untrack_conn(int fd);
+    void shutdown_live_conns();
+    void wait_for_conns();
 
     int port_;
     RestRouter& rest_;
@@ -46,6 +58,12 @@ private:
     // BUBBLES_MAX_CONNECTIONS.
     int max_connections_ = 256;
     std::atomic<int> open_connections_{0};
+
+    // Live connection fds + an in-flight thread count, so stop() can wake and drain them.
+    std::mutex conn_mu_;
+    std::condition_variable conn_cv_;
+    std::unordered_set<int> conn_fds_;
+    int active_conns_ = 0;
 };
 
 }

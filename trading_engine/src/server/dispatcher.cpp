@@ -37,7 +37,10 @@ void Dispatcher::on_connect(SessionPtr s) {
 
 void Dispatcher::on_message(SessionPtr s, std::string_view payload) {
     auto m = parse_inbound(payload);
-    if (m.type == ParsedMessage::Type::Unknown) {
+    // parse_inbound sets m.type before validating fields, so a rejected place/cancel can
+    // come back with a message type AND a parse_error. Treat any parse_error as a reject,
+    // otherwise a malformed order (e.g. quantity 0) is forwarded to handle_place.
+    if (m.type == ParsedMessage::Type::Unknown || !m.parse_error.empty()) {
         send_text(s, encode_error("BAD_REQUEST", m.parse_error));
         return;
     }
@@ -45,7 +48,7 @@ void Dispatcher::on_message(SessionPtr s, std::string_view payload) {
         case ParsedMessage::Type::Hello:
             // Hello is informational — store client_id, no reply (welcome was sent on connect).
             if (!m.hello.client_id.empty()) {
-                s->client_id = m.hello.client_id;
+                s->set_client_id(m.hello.client_id);
                 if (bots_) bots_->note_client_id(s->user_id, m.hello.client_id);
                 // Paused-bot enforcement: the moment we know the client_id we
                 // can decide whether this session is allowed. Pause state is
@@ -97,7 +100,7 @@ void Dispatcher::cancel_orders_for_client(std::string_view user_id, std::string_
     sessions_.for_each([&](const SessionPtr& s) {
         if (s->is_internal) return;
         if (s->user_id != user_id) return;       // squatting fix: per-user filter
-        if (s->client_id != client_id) return;
+        if (s->get_client_id() != client_id) return;
         std::lock_guard<std::mutex> lk(s->orders_mu);
         for (OrderId oid : s->own_orders) ids.push_back(oid);
     });
@@ -122,7 +125,8 @@ void Dispatcher::handle_place(SessionPtr s, const InboundPlaceOrder& p) {
     // Defensive pause check — if the bot got paused after hello (mid-session),
     // refuse new orders even though the WS may still be open. The hello-time
     // check already handles new connections.
-    if (bots_ && !s->client_id.empty() && bots_->is_paused(s->user_id, s->client_id)) {
+    const std::string cid = s->get_client_id();
+    if (bots_ && !cid.empty() && bots_->is_paused(s->user_id, cid)) {
         send_text(s, encode_error("BOT_PAUSED", "Bot is paused"));
         metrics_.ordersRejected++;
         return;
@@ -146,7 +150,7 @@ void Dispatcher::handle_place(SessionPtr s, const InboundPlaceOrder& p) {
     cmd.quantity = p.quantity;
     cmd.limit_price = p.limit_price;
     cmd.user_id = s->user_id;
-    cmd.client_id = s->client_id;
+    cmd.client_id = cid;
     cmd.client_order_id = p.client_order_id;
     cmd.session_id = s->id;
     cmd.is_internal = s->is_internal;
@@ -179,18 +183,21 @@ void Dispatcher::handle_subscribe(SessionPtr s, const InboundSubscribe& sub) {
         send_text(s, encode_error("UNKNOWN_SYMBOL", sub.symbol));
         return;
     }
+    if (sub.channel != "book" && sub.channel != "trades") {
+        send_text(s, encode_error("UNKNOWN_CHANNEL", sub.channel));
+        return;
+    }
+    // Queue the snapshot *before* registering the subscription. The other order lets a
+    // BookDelta reach the client ahead of the snapshot it is meant to build on, which the
+    // client reads as a sequence gap and answers with a resync — a subscribe/snapshot storm.
+    if (sub.channel == "book") {
+        auto snap = snapshots_->get(*sym);
+        if (snap) send_text(s, encode_book_snapshot(*snap, *registry_));
+    }
     {
         std::lock_guard<std::mutex> lk(s->sub_mu);
         if (sub.channel == "book") s->subscribed_books.insert(*sym);
-        else if (sub.channel == "trades") s->subscribed_trades.insert(*sym);
-        else { send_text(s, encode_error("UNKNOWN_CHANNEL", sub.channel)); return; }
-    }
-    if (sub.channel == "book") {
-        // Send latest snapshot immediately.
-        auto snap = snapshots_->get(*sym);
-        if (snap) {
-            send_text(s, encode_book_snapshot(*snap, *registry_));
-        }
+        else s->subscribed_trades.insert(*sym);
     }
 }
 
@@ -274,10 +281,9 @@ void Dispatcher::on_outbound(const OutboundEvent& ev) {
 
 void Dispatcher::send_text(SessionPtr s, const std::string& text) {
     if (!s || !s->alive.load() || s->sockfd < 0) return;
-    std::lock_guard<std::mutex> lk(s->write_mu);
-    if (!ws_write_text(s->sockfd, text)) {
-        s->alive = false;
-    }
+    // Enqueue only. This runs on the matching shard's worker thread, and a blocking send
+    // to a client that has stopped reading would stall the shard and halt the symbol.
+    queue_outbound(*s, text);
 }
 
 }  // namespace TradingSystem

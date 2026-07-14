@@ -1,5 +1,7 @@
 #pragma once
 #include <atomic>
+#include <condition_variable>
+#include <deque>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -14,29 +16,61 @@
 
 namespace TradingSystem {
 
+// A client that stops reading must not grow our outbound queue without bound. Dropping
+// individual frames would corrupt the L2 delta stream, so we disconnect it instead.
+inline constexpr size_t kMaxOutboundFrames = 4096;
+
 struct Session {
     SessionId id = 0;
     int sockfd = -1;
     std::string user_id;
-    std::string client_id;          // optional: bot-provided
     std::string api_key;
     bool is_internal = false;       // in-process producer (MM bot)
     std::atomic<bool> alive{true};
+
+    // Written by the reader thread on hello, read by REST threads (kick/leaderboard).
+    mutable std::mutex meta_mu;
+    std::string client_id;          // optional: bot-provided; guarded by meta_mu
 
     // Subscriptions. Protected by sub_mu_.
     std::mutex sub_mu;
     std::set<SymbolId> subscribed_books;
     std::set<SymbolId> subscribed_trades;
 
-    // Outbound write serialization.
+    // Outbound write serialization (writer thread; also the reader's pong/close).
     std::mutex write_mu;
+
+    // Outbound queue. EventBus::publish runs on the matching shard's worker thread, so a
+    // blocking send to a slow client would stall the shard and halt the whole symbol.
+    // Publishers only ever enqueue here; the session's writer thread does the actual I/O.
+    std::mutex out_mu;
+    std::condition_variable out_cv;
+    std::deque<std::string> out_q;
+    bool out_closing = false;       // drain what's queued, then close
+    bool out_dead = false;          // writer has exited; nothing more may be queued
 
     // Maps order_id → currently outstanding by this session, for routing maker fills.
     std::mutex orders_mu;
     std::set<OrderId> own_orders;
+
+    void set_client_id(std::string_view v) {
+        std::lock_guard<std::mutex> lk(meta_mu);
+        client_id = v;
+    }
+    [[nodiscard]] std::string get_client_id() const {
+        std::lock_guard<std::mutex> lk(meta_mu);
+        return client_id;
+    }
 };
 
 using SessionPtr = std::shared_ptr<Session>;
+
+// Queue an outbound frame. Never blocks and never writes to the socket. Returns false if
+// the session is gone or its queue is full (in which case the session is marked closing).
+bool queue_outbound(Session& s, std::string text);
+
+// Ask the writer thread to drain what is queued and then shut the connection down.
+void request_close(Session& s);
 
 class SessionRegistry {
 public:

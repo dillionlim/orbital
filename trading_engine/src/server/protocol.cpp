@@ -57,7 +57,14 @@ ParsedMessage parse_inbound(std::string_view json) {
     };
     auto get_uint = [&](const char* k, uint64_t& out) -> bool {
         if (doc.HasMember(k) && doc[k].IsUint64()) { out = doc[k].GetUint64(); return true; }
-        if (doc.HasMember(k) && doc[k].IsInt64()) { out = static_cast<uint64_t>(doc[k].GetInt64()); return true; }
+        // A negative int must be rejected, not cast: static_cast<uint64_t>(-1) is
+        // UINT64_MAX, which is non-zero and so slips past every `== 0` guard.
+        if (doc.HasMember(k) && doc[k].IsInt64()) {
+            int64_t v = doc[k].GetInt64();
+            if (v < 0) return false;
+            out = static_cast<uint64_t>(v);
+            return true;
+        }
         return false;
     };
     auto get_dbl = [&](const char* k, double& out) -> bool {

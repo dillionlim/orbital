@@ -197,6 +197,39 @@ void emits_ack_fills_trade_print_and_book_delta_for_a_match() {
     engine.stop();
 }
 
+// STP cancels the maker, then the taker rejects for no liquidity. The reject path used to
+// return before publishing a delta, leaving subscribers rendering the cancelled level.
+void publishes_book_delta_when_self_trade_prevention_empties_the_book() {
+    EventBus bus;
+    EventCollector events{bus};
+    std::atomic<uint64_t> trade_ids{1};
+    MatchingEngine engine{7, bus, trade_ids};
+    engine.start();
+
+    require(engine.submit(InboundCmd{place(20, OrderSide::Sell, OrderType::Limit, 10, 105.0,
+                                           "solo", "solo_bot")}),
+            "maker order should enqueue");
+    require(events.wait_until([](const auto& snapshot) {
+        return has_ask_delta(snapshot, 105.0, 10);
+    }), "maker ask should publish to the book");
+
+    // Same user: the only crossable liquidity is its own resting maker.
+    require(engine.submit(InboundCmd{place(21, OrderSide::Buy, OrderType::Market, 5, 0.0,
+                                           "solo", "solo_bot")}),
+            "self-crossing market order should enqueue");
+
+    require(events.wait_until([](const auto& snapshot) {
+        return has_reject(snapshot, 21, "no_liquidity");
+    }), "taker rejects once its own maker is cancelled away");
+
+    // The cancelled level must be published as removed (qty 0), not left stale.
+    require(events.wait_until([](const auto& snapshot) {
+        return has_ask_delta(snapshot, 105.0, 0);
+    }), "the self-trade-cancelled level should publish as removed");
+
+    engine.stop();
+}
+
 struct TestCase {
     const char* name;
     void (*run)();
@@ -208,6 +241,8 @@ const std::vector<TestCase>& test_cases() {
         {"rejects_market_order_when_book_is_empty", rejects_market_order_when_book_is_empty},
         {"emits_ack_fills_trade_print_and_book_delta_for_a_match",
          emits_ack_fills_trade_print_and_book_delta_for_a_match},
+        {"publishes_book_delta_when_self_trade_prevention_empties_the_book",
+         publishes_book_delta_when_self_trade_prevention_empties_the_book},
     };
     return cases;
 }

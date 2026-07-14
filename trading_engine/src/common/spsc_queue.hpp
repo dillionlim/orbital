@@ -2,6 +2,7 @@
 #include <atomic>
 #include <condition_variable>
 #include <cstddef>
+#include <cstdint>
 #include <deque>
 #include <mutex>
 #include <utility>
@@ -51,6 +52,78 @@ private:
     alignas(64) std::atomic<size_t> head_{0};
     alignas(64) std::atomic<size_t> tail_{0};
     std::vector<T> buf_;
+};
+
+// Bounded multi-producer / single-consumer ring (Vyukov). Capacity must be a power of two.
+// Bounded, unlike MPSCQueue, so try_push can still report full and the Sequencer can reject.
+template <QueueValue T, size_t Capacity>
+class MPSCRing {
+    static_assert(Capacity > 0 && (Capacity & (Capacity - 1)) == 0,
+                  "Capacity must be a power of two");
+
+public:
+    MPSCRing() : buf_(Capacity) {
+        for (size_t i = 0; i < Capacity; ++i) {
+            buf_[i].seq.store(i, std::memory_order_relaxed);
+        }
+    }
+
+    [[nodiscard]] bool try_push(T value) {
+        size_t pos = enqueue_pos_.load(std::memory_order_relaxed);
+        for (;;) {
+            Cell& cell = buf_[pos & mask_];
+            const size_t seq = cell.seq.load(std::memory_order_acquire);
+            const auto diff =
+                static_cast<std::intptr_t>(seq) - static_cast<std::intptr_t>(pos);
+            if (diff == 0) {
+                if (enqueue_pos_.compare_exchange_weak(pos, pos + 1,
+                                                       std::memory_order_relaxed)) {
+                    cell.data = std::move(value);
+                    // Publish; the consumer may only read this cell once seq == pos + 1.
+                    cell.seq.store(pos + 1, std::memory_order_release);
+                    return true;
+                }
+            } else if (diff < 0) {
+                return false;  // Full.
+            } else {
+                pos = enqueue_pos_.load(std::memory_order_relaxed);
+            }
+        }
+    }
+
+    [[nodiscard]] bool try_pop(T& out) {
+        const size_t pos = dequeue_pos_.load(std::memory_order_relaxed);
+        Cell& cell = buf_[pos & mask_];
+        const size_t seq = cell.seq.load(std::memory_order_acquire);
+        const auto diff =
+            static_cast<std::intptr_t>(seq) - static_cast<std::intptr_t>(pos + 1);
+        // Empty, or a producer has claimed the slot but not published it yet.
+        if (diff != 0) return false;
+
+        out = std::move(cell.data);
+        // Hand the slot to the producer one lap ahead.
+        cell.seq.store(pos + mask_ + 1, std::memory_order_release);
+        dequeue_pos_.store(pos + 1, std::memory_order_relaxed);
+        return true;
+    }
+
+    [[nodiscard]] bool empty() const {
+        const size_t pos = dequeue_pos_.load(std::memory_order_relaxed);
+        const size_t seq = buf_[pos & mask_].seq.load(std::memory_order_acquire);
+        return static_cast<std::intptr_t>(seq) -
+                   static_cast<std::intptr_t>(pos + 1) != 0;
+    }
+
+private:
+    struct Cell {
+        std::atomic<size_t> seq;
+        T data;
+    };
+
+    static constexpr size_t mask_ = Capacity - 1;
+    alignas(64) std::atomic<size_t> enqueue_pos_{0};
+    alignas(64) std::atomic<size_t> dequeue_pos_{0};
+    std::vector<Cell> buf_;
 };
 
 // Multi-producer / single-consumer queue. Simple mutex+deque; not on the per-symbol

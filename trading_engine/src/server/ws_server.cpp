@@ -82,6 +82,23 @@ void set_socket_timeout(int fd, int ms) {
     ::setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
 }
 
+void set_send_timeout(int fd, int ms) {
+    struct timeval tv{};
+    tv.tv_sec = ms / 1000;
+    tv.tv_usec = (ms % 1000) * 1000;
+    ::setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+}
+
+void set_recv_timeout(int fd, int ms) {
+    struct timeval tv{};
+    tv.tv_sec = ms / 1000;
+    tv.tv_usec = (ms % 1000) * 1000;
+    ::setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+}
+
+// A client that has stopped reading must not be able to park a writer thread forever.
+constexpr int kSendTimeoutMs = 10000;
+
 }  // namespace
 
 WsServer::WsServer(int port, RestRouter& rest, Dispatcher& dispatcher,
@@ -135,6 +152,12 @@ void WsServer::stop() {
         listen_fd_ = -1;
     }
     if (accept_thread_.joinable()) accept_thread_.join();
+
+    // Connection threads are detached and parked in a blocking read. Wake them, then wait
+    // for every one to leave before returning: main tears down the Dispatcher, Sequencer
+    // and shards straight after this, and a straggler would run on into freed memory.
+    shutdown_live_conns();
+    wait_for_conns();
 }
 
 void WsServer::accept_loop() {
@@ -143,7 +166,12 @@ void WsServer::accept_loop() {
         socklen_t cl = sizeof(cli);
         int fd = ::accept(listen_fd_, (struct sockaddr*)&cli, &cl);
         if (fd < 0) {
-            if (running_.load()) LOG_WARN("ws_server: accept() error: " << strerror(errno));
+            if (!running_.load()) break;
+            LOG_WARN("ws_server: accept() error: " << strerror(errno));
+            // Out of descriptors returns immediately; without a pause this spins a core.
+            if (errno == EMFILE || errno == ENFILE || errno == ENOBUFS || errno == ENOMEM) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            }
             continue;
         }
         // Disable Nagle for low-latency frames.
@@ -167,10 +195,12 @@ void WsServer::accept_loop() {
         set_socket_timeout(fd, kHandshakeTimeoutMs);
 
         metrics_.recordConnection();
+        track_conn(fd);
         std::thread([this, fd] {
             handle_connection(fd);
             metrics_.closeConnection();
             open_connections_.fetch_sub(1, std::memory_order_relaxed);
+            untrack_conn(fd);
         }).detach();
     }
 }
@@ -242,11 +272,11 @@ void WsServer::handle_connection(int sockfd) {
         return;
     }
 
-    // The peer holds a valid key, so the handshake deadline has done its job.
-    // Clear it: a live session blocks in ws_read_frame waiting for the client's
-    // next message, and a subscriber that is merely quiet for 10s is not a
-    // slowloris — leaving the timeout on would disconnect every idle bot.
-    set_socket_timeout(sockfd, 0);
+    // The peer holds a valid key, so the handshake deadline has done its job. Clear the
+    // *receive* deadline only: a subscriber that is merely quiet is not a slowloris.
+    // The send deadline stays on, so a client that stops reading cannot park us forever.
+    set_recv_timeout(sockfd, 0);
+    set_send_timeout(sockfd, kSendTimeoutMs);
 
     // Send 101. If we accepted via subprotocol, the server MUST echo the
     // selected one back per RFC 6455 §4.2.2 — otherwise browsers reject.
@@ -259,15 +289,83 @@ void WsServer::handle_connection(int sockfd) {
     auto sess = sessions_.create(sockfd, api_key, auth_res.user_id);
     LOG_INFO("ws_server: session id=" << sess->id << " user=" << sess->user_id
                                        << " connected (fd=" << sockfd << ")");
+
+    // The writer owns all socket writes; publishers only enqueue.
+    std::thread writer([this, sess] { writer_loop(sess); });
+
     dispatcher_.on_connect(sess);
 
     // Reader loop runs on this thread.
     session_loop(sess);
 
+    // Wake the writer and let it drain, then join. After this no other thread can write
+    // to sockfd, which is what makes the close below safe against fd reuse.
+    sess->alive = false;
+    request_close(*sess);
+    writer.join();
+
     dispatcher_.on_disconnect(sess);
     sessions_.erase(sess->id);
     ::close(sockfd);
     LOG_INFO("ws_server: session id=" << sess->id << " disconnected");
+}
+
+void WsServer::writer_loop(SessionPtr s) {
+    for (;;) {
+        std::string msg;
+        {
+            std::unique_lock<std::mutex> lk(s->out_mu);
+            s->out_cv.wait(lk, [&] {
+                return !s->out_q.empty() || s->out_closing || !s->alive.load();
+            });
+            if (s->out_q.empty()) break;   // closing or dead, and nothing left to drain
+            msg = std::move(s->out_q.front());
+            s->out_q.pop_front();
+        }
+        std::lock_guard<std::mutex> lk(s->write_mu);
+        if (!ws_write_text(s->sockfd, msg)) {
+            s->alive = false;
+            break;
+        }
+    }
+    {
+        std::lock_guard<std::mutex> lk(s->out_mu);
+        s->out_dead = true;   // refuse further queuing; nothing will drain it
+    }
+    {
+        std::lock_guard<std::mutex> lk(s->write_mu);
+        ws_write_close(s->sockfd);   // best-effort courtesy close
+    }
+    s->alive = false;
+    // Unblock the reader thread parked in read() so the connection tears down.
+    ::shutdown(s->sockfd, SHUT_RDWR);
+}
+
+void WsServer::track_conn(int fd) {
+    std::lock_guard<std::mutex> lk(conn_mu_);
+    conn_fds_.insert(fd);
+    ++active_conns_;
+}
+
+void WsServer::untrack_conn(int fd) {
+    {
+        std::lock_guard<std::mutex> lk(conn_mu_);
+        conn_fds_.erase(fd);
+        --active_conns_;
+    }
+    conn_cv_.notify_all();
+}
+
+void WsServer::shutdown_live_conns() {
+    std::lock_guard<std::mutex> lk(conn_mu_);
+    // Wakes threads blocked in read()/send() without closing the fd — the owning thread
+    // still closes it, so we cannot yank an fd out from under an in-flight syscall.
+    for (int fd : conn_fds_) ::shutdown(fd, SHUT_RDWR);
+}
+
+void WsServer::wait_for_conns() {
+    std::unique_lock<std::mutex> lk(conn_mu_);
+    conn_cv_.wait(lk, [&] { return active_conns_ == 0; });
 }
 
 void WsServer::session_loop(SessionPtr s) {

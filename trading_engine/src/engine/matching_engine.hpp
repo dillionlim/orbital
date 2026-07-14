@@ -14,7 +14,8 @@ namespace TradingSystem {
 class MatchingEngine {
 public:
     static constexpr size_t kQueueCapacity = 65536;
-    using Queue = SPSCQueue<InboundCmd, kQueueCapacity>;
+    // Multi-producer: fed by every per-connection WS thread plus the MM and news bots.
+    using Queue = MPSCRing<InboundCmd, kQueueCapacity>;
 
     MatchingEngine(SymbolId symbol, EventBus& bus, std::atomic<uint64_t>& trade_id_counter);
 

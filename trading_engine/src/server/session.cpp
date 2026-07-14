@@ -9,6 +9,30 @@
 
 namespace TradingSystem {
 
+bool queue_outbound(Session& s, std::string text) {
+    {
+        std::lock_guard<std::mutex> lk(s.out_mu);
+        if (s.out_dead || s.out_closing) return false;
+        if (s.out_q.size() >= kMaxOutboundFrames) {
+            // Slow consumer. Kick it rather than drop frames out of the delta stream.
+            s.out_closing = true;
+            s.out_cv.notify_all();
+            return false;
+        }
+        s.out_q.push_back(std::move(text));
+    }
+    s.out_cv.notify_one();
+    return true;
+}
+
+void request_close(Session& s) {
+    {
+        std::lock_guard<std::mutex> lk(s.out_mu);
+        s.out_closing = true;
+    }
+    s.out_cv.notify_all();
+}
+
 SessionPtr SessionRegistry::create(int sockfd, std::string_view api_key,
                                    std::string_view user_id) {
     auto s = std::make_shared<Session>();
@@ -67,37 +91,23 @@ void SessionRegistry::for_each(const std::function<void(const SessionPtr&)>& fn)
 
 size_t SessionRegistry::kick_by_client_id(std::string_view user_id, std::string_view client_id) {
     if (client_id.empty() || user_id.empty()) return 0;
-    // Take the alive→false transition under the registry lock so any writes
-    // we do below race against at most one outstanding I/O on the session
-    // (whatever was already in flight when we flipped the flag). Sessions
-    // that were already !alive when we got here are skipped — without that
-    // guard we could write a paused-close frame onto an fd whose underlying
-    // session already disconnected, and in the worst case the fd has been
-    // recycled to an unrelated freshly-accepted connection.
     std::vector<SessionPtr> targets;
     {
         std::lock_guard<std::mutex> lk(mu_);
         for (const auto& [_, s] : by_id_) {
             if (s->is_internal) continue;
             if (s->user_id != user_id) continue;       // squatting fix
-            if (s->client_id != client_id) continue;
-            // Atomic exchange: only the caller that flips true→false wins;
-            // anyone else (e.g. the reader thread on a clean close) skips.
-            bool prev = s->alive.exchange(false);
-            if (prev) targets.push_back(s);
+            if (s->get_client_id() != client_id) continue;
+            targets.push_back(s);
         }
     }
+    // Hand the frames to the session's writer thread rather than writing the fd here: it
+    // is the only thread allowed to touch the socket, and it is joined before the fd is
+    // closed, so we cannot write onto an fd that has been recycled to another connection.
     size_t kicked = 0;
     for (auto& s : targets) {
-        if (s->sockfd >= 0) {
-            {
-                std::lock_guard<std::mutex> lk(s->write_mu);
-                ws_write_text(s->sockfd, encode_error("BOT_PAUSED",
-                    "Bot was paused from the dashboard."));
-                ws_write_close(s->sockfd, 1000, "paused");
-            }
-            ::shutdown(s->sockfd, SHUT_RDWR);
-        }
+        queue_outbound(*s, encode_error("BOT_PAUSED", "Bot was paused from the dashboard."));
+        request_close(*s);
         ++kicked;
     }
     return kicked;
@@ -114,10 +124,11 @@ std::unordered_set<std::string> SessionRegistry::connected_client_ids() const {
     for (const auto& [_, s] : by_id_) {
         if (s->is_internal) continue;
         if (!s->alive.load()) continue;
-        if (s->client_id.empty() || s->user_id.empty()) continue;
+        const std::string cid = s->get_client_id();
+        if (cid.empty() || s->user_id.empty()) continue;
         // Composite key: matches BotTracker's by_key_ scheme so two distinct
         // users with the same client_id don't see each other's "live" status.
-        out.insert(s->user_id + "::" + s->client_id);
+        out.insert(s->user_id + "::" + cid);
     }
     return out;
 }

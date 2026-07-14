@@ -153,17 +153,29 @@ std::string extractApiKeyFromHttp(std::string_view request) {
     //      key (combined with the engine's `Allow-Origin: *`). Header auth
     //      forces a preflight which the browser blocks for unknown origins.
     //
+    // End of the header line at/after `pos`: the FIRST of \r\n or \n. Searching for \r\n
+    // first (with an \n fallback) instead lets a lone-LF-terminated header run on and
+    // swallow later lines up to the next \r\n.
+    auto line_end = [&](size_t pos) -> size_t {
+        size_t e = request.size();
+        for (size_t i = pos; i < request.size(); ++i) {
+            if (request[i] == '\n') { e = i; break; }
+            if (request[i] == '\r') { e = i; break; }
+        }
+        return e;
+    };
+
     // 1. Authorization: Bearer <key>
     size_t authPos = request.find("Authorization:");
     if (authPos == std::string_view::npos) authPos = request.find("authorization:");
     if (authPos != std::string_view::npos) {
-        size_t start = request.find("Bearer ", authPos);
-        if (start != std::string_view::npos) {
-            start += 7;
-            size_t end = request.find("\r\n", start);
-            if (end == std::string_view::npos) end = request.find("\n", start);
-            if (end != std::string_view::npos) return std::string(request.substr(start, end - start));
-            return std::string(request.substr(start));
+        size_t eol = line_end(authPos);
+        // Scope the Bearer scan to the Authorization line so a "Bearer x" sitting in some
+        // later header can't be picked up as the credential.
+        std::string_view line = request.substr(authPos, eol - authPos);
+        size_t b = line.find("Bearer ");
+        if (b != std::string_view::npos) {
+            return std::string(line.substr(b + 7));
         }
     }
 
@@ -172,11 +184,9 @@ std::string extractApiKeyFromHttp(std::string_view request) {
     if (apiPos == std::string_view::npos) apiPos = request.find("api-key:");
     if (apiPos != std::string_view::npos) {
         size_t start = apiPos + 8;
-        while (start < request.size() && request[start] == ' ') start++;
-        size_t end = request.find("\r\n", start);
-        if (end == std::string_view::npos) end = request.find("\n", start);
-        if (end != std::string_view::npos) return std::string(request.substr(start, end - start));
-        return std::string(request.substr(start));
+        size_t eol = line_end(start);
+        while (start < eol && request[start] == ' ') start++;
+        return std::string(request.substr(start, eol - start));
     }
 
     return "";

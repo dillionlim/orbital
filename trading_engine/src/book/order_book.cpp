@@ -12,6 +12,14 @@ ApplyResult OrderBook::apply(std::unique_ptr<Order> order) {
     Order* o = order.get();
     result.order_id = o->id;
 
+    // by_id_.emplace() below would drop a duplicate id *after* the raw Order* was linked
+    // into the price level, leaving the level holding a dangling pointer. Reject up front.
+    if (by_id_.count(o->id) != 0) {
+        result.status = OrderStatus::Rejected;
+        result.reject_reason = "duplicate_order_id";
+        return result;
+    }
+
     const bool is_market = (o->type == OrderType::Market);
     const bool is_buy = (o->side == OrderSide::Buy);
 

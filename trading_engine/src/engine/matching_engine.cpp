@@ -81,6 +81,11 @@ void MatchingEngine::worker_loop() {
             e.ts = now_ms();
             e.is_internal = is_internal;
             bus_.publish(e);
+            // STP already removed makers from the book; without this the reject path
+            // would return and leave subscribers rendering the cancelled levels.
+            if (!r.stp_cancels.empty()) {
+                publish_book_change();
+            }
             return;
         }
 
