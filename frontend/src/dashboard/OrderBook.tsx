@@ -10,6 +10,11 @@ import { httpBase } from '../services/engineUrl';
 
 const REST_FALLBACK_POLL_MS = 1000;
 
+// Only the top of the book is worth showing. The engine publishes every resting
+// level, and the tail is mostly stale far-from-touch orders that push the
+// interesting levels out of view.
+const DEPTH_LEVELS = 8;
+
 interface OrderBookData {
   bids: Order[];
   asks: Order[];
@@ -177,17 +182,27 @@ export const OrderBook: React.FC = () => {
     return () => clearInterval(interval);
   }, [fetchOrderBook, isApiKeyLoading, wsStatus]);
 
-  const maxTotal = Math.max(
-    bids.reduce((acc, curr) => acc + curr.size * curr.price, 0),
-    asks.reduce((acc, curr) => acc + curr.size * curr.price, 0)
-  );
-
+  // Bids arrive descending and asks ascending, so the first DEPTH_LEVELS rows are
+  // the ones nearest the touch. Filtering happens first: a filter is a search over
+  // the whole book, and the cap then applies to whatever matched.
   const filteredBids = bids.filter(bid =>
     !filter || (bid.price.toString().includes(filter) || bid.size.toString().includes(filter))
   );
 
   const filteredAsks = asks.filter(ask =>
     !filter || (ask.price.toString().includes(filter) || ask.size.toString().includes(filter))
+  );
+
+  const visibleBids = filteredBids.slice(0, DEPTH_LEVELS);
+  const visibleAsks = filteredAsks.slice(0, DEPTH_LEVELS);
+  const hiddenLevels =
+    (filteredBids.length - visibleBids.length) + (filteredAsks.length - visibleAsks.length);
+
+  // Scale the depth bars to the levels actually on screen — including the hidden
+  // tail would squash every visible bar toward zero.
+  const maxTotal = Math.max(
+    visibleBids.reduce((acc, curr) => acc + curr.size * curr.price, 0),
+    visibleAsks.reduce((acc, curr) => acc + curr.size * curr.price, 0)
   );
 
   const transportLabel = wsStatus === 'open' ? 'live' : wsStatus === 'connecting' ? 'connecting' : 'polling';
@@ -268,12 +283,12 @@ export const OrderBook: React.FC = () => {
               <div className="flex items-center justify-center h-full text-slate-500">
                 Loading...
               </div>
-            ) : filteredBids.length === 0 ? (
+            ) : visibleBids.length === 0 ? (
               <div className="flex items-center justify-center h-full text-slate-500">
                 No bids
               </div>
             ) : (
-              filteredBids.map((bid, i) => (
+              visibleBids.map((bid, i) => (
                 <div key={`bid-${i}`} className="grid grid-cols-[0.8fr_1fr_1fr] gap-1 px-1 py-0.5 hover:bg-green-900/20 cursor-pointer relative">
                   <div className="absolute top-0 right-0 h-full bg-green-900/20" style={{ width: `${maxTotal > 0 ? ((bid.size * bid.price) / maxTotal) * 100 : 0}%` }} />
                   <span className="text-right text-slate-300 truncate relative z-10">{bid.size.toFixed(3)}</span>
@@ -290,12 +305,12 @@ export const OrderBook: React.FC = () => {
               <div className="flex items-center justify-center h-full text-slate-500">
                 Loading...
               </div>
-            ) : filteredAsks.length === 0 ? (
+            ) : visibleAsks.length === 0 ? (
               <div className="flex items-center justify-center h-full text-slate-500">
                 No asks
               </div>
             ) : (
-              filteredAsks.map((ask, i) => (
+              visibleAsks.map((ask, i) => (
                 <div key={`ask-${i}`} className="grid grid-cols-[1fr_0.8fr_1fr] gap-1 px-1 py-0.5 hover:bg-red-900/20 cursor-pointer relative">
                   <div className="absolute top-0 left-0 h-full bg-red-900/20" style={{ width: `${maxTotal > 0 ? ((ask.size * ask.price) / maxTotal) * 100 : 0}%` }} />
                   <span className="text-left text-red-500 font-bold relative z-10">{ask.price.toFixed(1)}</span>
@@ -306,6 +321,12 @@ export const OrderBook: React.FC = () => {
             )}
           </div>
         </div>
+
+        {!isLoading && hiddenLevels > 0 && (
+          <div className="pt-1.5 mt-1 border-t border-slate-800 text-[10px] text-slate-500 text-center">
+            Top {DEPTH_LEVELS} levels per side · {hiddenLevels} deeper {hiddenLevels === 1 ? 'level' : 'levels'} hidden
+          </div>
+        )}
       </div>
     </Card>
   );
