@@ -79,8 +79,9 @@ export class HistoricalDataService {
   private lib: Promise<{ hp: Hyparquet; compressors: Compressors['compressors'] }> | null =
     null;
   // Cache the ts column per file (cheap, ~one number array) so range-slicing on
-  // repeat runs doesn't re-decode it.
-  private readonly tsCache = new Map<string, number[]>();
+  // repeat runs doesn't re-decode it. Keyed with the row count it was decoded at:
+  // a parquet regenerated while the process is warm invalidates the entry.
+  private readonly tsCache = new Map<string, { nrows: number; ts: number[] }>();
 
   private load() {
     if (!this.lib) {
@@ -142,7 +143,8 @@ export class HistoricalDataService {
     }
 
     // ts column (cached) → find the first row inside the lookback window.
-    let tsArr = this.tsCache.get(rel);
+    const cached = this.tsCache.get(rel);
+    let tsArr = cached?.nrows === nrows ? cached.ts : undefined;
     if (!tsArr) {
       const tsRows = (await hp.parquetReadObjects({
         file: f,
@@ -152,9 +154,15 @@ export class HistoricalDataService {
         rowEnd: nrows,
       })) as Array<{ ts: number | bigint }>;
       tsArr = tsRows.map((r) => Number(r.ts));
-      this.tsCache.set(rel, tsArr);
+      this.tsCache.set(rel, { nrows, ts: tsArr });
     }
     const lastTs = tsArr[nrows - 1];
+    if (!Number.isFinite(lastTs)) {
+      // A NaN lastTs makes the window bound NaN, and lowerBound then returns 0 —
+      // silently serving the entire file for a '5d' request. Serve nothing instead.
+      this.logger.warn(`backtest ${symbol}/${granularity}: unusable ts column`);
+      return { symbol, granularity, range: rangeRaw, trades: [], count: 0, stride: 1 };
+    }
     const winMs = RANGE_MS[rangeRaw] ?? RANGE_MS['1mo'];
     const startIdx = lowerBound(tsArr, lastTs - winMs);
     const windowLen = nrows - startIdx;

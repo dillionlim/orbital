@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
 import { PrismaService } from '../prisma.service';
@@ -11,6 +11,23 @@ import {
 } from './price-store';
 
 export type { Sample } from './price-store';
+
+// The slice of Yahoo's v8 chart payload we read.
+interface YahooChart {
+  chart?: {
+    result?: Array<{
+      meta?: { chartPreviousClose?: number; previousClose?: number };
+      timestamp?: number[];
+      indicators?: {
+        quote?: Array<{
+          open?: (number | null)[];
+          close?: (number | null)[];
+          volume?: (number | null)[];
+        }>;
+      };
+    }> | null;
+  };
+}
 
 interface InstrumentDef {
   symbol: string;
@@ -372,27 +389,41 @@ export class IndexPricesService {
   }
 
   // Real historical OHLC from Yahoo, mapped to the backtester's trade shape (one
-  // synthetic trade per bar at the close). `range`/`interval` are validated.
+  // synthetic trade per bar at the close). `symbol`/`range`/`interval` are validated.
   async getCandles(symbol: string, range: string, interval: string) {
     const RANGES = new Set(['1d', '5d', '1mo', '3mo', '6mo', '1y']);
     const INTERVALS = new Set(['1m', '2m', '5m', '15m', '30m', '60m', '1d']);
     const r = RANGES.has(range) ? range : '1mo';
     const iv = INTERVALS.has(interval) ? interval : '1d';
 
+    // Only known instruments — forwarding an arbitrary query string to Yahoo
+    // would make this endpoint an open unauthenticated relay.
     const def = INSTRUMENTS.find(
-      (i) => i.symbol.toLowerCase() === symbol.toLowerCase(),
+      (i) => i.symbol.toLowerCase() === (symbol ?? '').toLowerCase(),
     );
-    const yahoo = def?.yahoo ?? symbol;
-    const wire = def?.symbol ?? symbol;
-    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yahoo)}`;
+    if (!def?.yahoo) {
+      throw new BadRequestException(`unknown symbol '${symbol ?? ''}'`);
+    }
+    const wire = def.symbol;
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(def.yahoo)}`;
 
-    const res = await firstValueFrom(
-      this.http.get(url, {
-        params: { range: r, interval: iv },
-        headers: { 'User-Agent': 'Mozilla/5.0' },
-        timeout: 8000,
-      }),
-    );
+    let res: { data?: YahooChart };
+    try {
+      res = await firstValueFrom(
+        this.http.get<YahooChart>(url, {
+          params: { range: r, interval: iv },
+          headers: { 'User-Agent': 'Mozilla/5.0' },
+          timeout: 8000,
+        }),
+      );
+    } catch (err) {
+      // Yahoo rate-limiting or timing out is not a server error on our side —
+      // degrade to an empty series like every other fetch in this service.
+      this.logger.debug(
+        `candles fetch failed for ${def.yahoo}: ${(err as Error).message}`,
+      );
+      return { symbol: wire, range: r, interval: iv, trades: [], count: 0 };
+    }
     const result = res.data?.chart?.result?.[0];
     const ts: number[] = result?.timestamp ?? [];
     const q = result?.indicators?.quote?.[0] ?? {};

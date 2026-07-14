@@ -179,7 +179,7 @@ describe('ApiKeyService', () => {
     });
 
     // Covers valid-looking keys that are no longer usable.
-    it('rejects inactive or expired keys', async () => {
+    it('rejects expired keys', async () => {
       prisma.apiKey.findUnique.mockResolvedValue({
         key: 'sk_live_expired',
         isActive: true,
@@ -189,6 +189,45 @@ describe('ApiKeyService', () => {
 
       await expect(service.validateApiKey('sk_live_expired')).resolves.toEqual({
         valid: false,
+      });
+    });
+
+    // A revoked key is still well-formed and unexpired, so only the isActive
+    // check stands between it and a valid session.
+    it('rejects revoked keys', async () => {
+      prisma.apiKey.findUnique.mockResolvedValue({
+        key: 'sk_live_revoked',
+        isActive: false,
+        expiresAt: new Date(Date.now() + 60_000),
+        user: { clerkId: 'auth_user_1' },
+      });
+
+      await expect(service.validateApiKey('sk_live_revoked')).resolves.toEqual({
+        valid: false,
+      });
+    });
+
+    // A well-formed key that was never issued must not authenticate.
+    it('rejects keys that are not in the database', async () => {
+      prisma.apiKey.findUnique.mockResolvedValue(null);
+
+      await expect(service.validateApiKey('sk_live_unknown')).resolves.toEqual({
+        valid: false,
+      });
+    });
+
+    // A null expiry means "never expires", not "already expired".
+    it('accepts non-expiring keys', async () => {
+      prisma.apiKey.findUnique.mockResolvedValue({
+        key: 'sk_live_forever',
+        isActive: true,
+        expiresAt: null,
+        user: { clerkId: 'auth_user_1' },
+      });
+
+      await expect(service.validateApiKey('sk_live_forever')).resolves.toEqual({
+        valid: true,
+        userId: 'auth_user_1',
       });
     });
   });

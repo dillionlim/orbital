@@ -43,6 +43,27 @@ function supabase(): SupabaseClient {
 // client doesn't hit Supabase's /auth/v1/user on every call.
 const cache = new Map<string, { auth: SupabaseAuthInfo; exp: number }>();
 const CACHE_MS = 30_000;
+export const MAX_CACHE_ENTRIES = 1_000;
+
+// Supabase rotates tokens ~hourly, so entries are dead weight the moment they
+// expire — without this the map grows forever on a long-lived host.
+function pruneCache(now: number): void {
+  for (const [token, entry] of cache) {
+    if (entry.exp <= now) cache.delete(token);
+  }
+  // Still full of live entries (a burst of distinct tokens): drop the oldest,
+  // which Map iterates first.
+  while (cache.size >= MAX_CACHE_ENTRIES) {
+    const oldest = cache.keys().next().value;
+    if (oldest === undefined) break;
+    cache.delete(oldest);
+  }
+}
+
+// Test seam: the cache is module-level, so its size is otherwise unobservable.
+export function tokenCacheSize(): number {
+  return cache.size;
+}
 
 @Injectable()
 export class SupabaseAuthGuard implements CanActivate {
@@ -63,6 +84,7 @@ export class SupabaseAuthGuard implements CanActivate {
       req.auth = hit.auth;
       return true;
     }
+    pruneCache(now);
 
     const { data, error } = await supabase().auth.getUser(token);
     if (error || !data?.user) {
