@@ -1,13 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Wifi, WifiOff, LogOut, Plus, User as UserIcon, Menu, ChevronDown } from 'lucide-react';
+import { Wifi, WifiOff, LogOut, Plus, User as UserIcon, Menu, ChevronDown, HelpCircle } from 'lucide-react';
 import { ConnectionStatus } from '../types';
 import { useUser, signOut } from '../lib/auth';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { AddServerModal } from './AddServerModal';
 import { ApiKeyBadge } from './ApiKeyBadge';
 import { CustomDropdown } from './CustomDropdown';
 import { setCurrentServer as broadcastCurrentServer } from '../hooks/useCurrentServer';
+import { replayOnboarding } from '../hooks/useOnboarding';
 import BubblesIcon from '../ui/BubblesIcon';
 import { httpBase, DEFAULT_SERVER } from '../services/engineUrl';
 
@@ -17,6 +18,7 @@ const KEY_SERVERS = 'servers';
 export const Header: React.FC = () => {
   const { user } = useUser();
   const pathname = usePathname();
+  const router = useRouter();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   // Server Management State — hydrated from localStorage on mount so the dropdown
@@ -78,6 +80,15 @@ export const Header: React.FC = () => {
     setIsUserMenuOpen(false);
     await signOut();
     window.location.replace('/');
+  };
+
+  // The tour spotlights dashboard widgets, so it can only run there. From any
+  // other page, navigate first — replayOnboarding() leaves a flag the tour picks
+  // up when it mounts.
+  const handleReplayTour = () => {
+    setIsUserMenuOpen(false);
+    replayOnboarding();
+    if (pathname !== '/dashboard') router.push('/dashboard');
   };
 
   const toggleConnection = () => {
@@ -186,7 +197,7 @@ export const Header: React.FC = () => {
           </Link>
 
           {/* Desktop Navigation */}
-          <nav className="hidden md:flex items-center gap-4">
+          <nav className="hidden md:flex items-center gap-4" data-tour="nav">
             {navLinks.map((link) => (
               <Link key={link.href} href={link.href}>
                 <span className={`text-sm font-medium transition-colors ${pathname === link.href ? 'text-white' : 'text-slate-400 hover:text-white'}`}>
@@ -202,7 +213,7 @@ export const Header: React.FC = () => {
           <div className="flex items-center gap-2">
              <span className="text-slate-400 text-xs font-mono hidden sm:inline">SERVER:</span>
              
-             <div className="flex items-center bg-slate-800 rounded-md border border-slate-700 px-3 py-1.5 w-64 md:w-80">
+             <div className="flex items-center bg-slate-800 rounded-md border border-slate-700 px-3 py-1.5 w-64 md:w-80" data-tour="server">
                 <CustomDropdown
                   options={servers}
                   selected={currentServer}
@@ -239,7 +250,7 @@ export const Header: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-3">
-          <div className="hidden md:block">
+          <div className="hidden md:block" data-tour="apikey">
             <ApiKeyBadge />
           </div>
 
@@ -276,6 +287,15 @@ export const Header: React.FC = () => {
                   <UserIcon className="w-4 h-4" />
                   Profile
                 </Link>
+                <button
+                  type="button"
+                  onClick={handleReplayTour}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-sm text-slate-300 hover:bg-slate-700/60 hover:text-white transition-colors"
+                  role="menuitem"
+                >
+                  <HelpCircle className="w-4 h-4" />
+                  Replay tutorial
+                </button>
                 <button
                   type="button"
                   onClick={() => void handleLogout()}

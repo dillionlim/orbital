@@ -14,6 +14,7 @@ import { PnLCharts } from "@/src/dashboard/PnLCharts";
 import { NewsFeed } from "@/src/dashboard/NewsFeed";
 import { SimulatedBots } from "@/src/dashboard/SimulatedBots";
 import { Backtester } from "@/src/dashboard/Backtester";
+import { Onboarding } from "@/src/onboarding/Onboarding";
 
 export default function Dashboard() {
   const { isLoaded, isSignedIn } = useUser();
@@ -36,16 +37,16 @@ export default function Dashboard() {
       
       <main className="p-4 md:p-6 grid grid-cols-1 md:grid-cols-12 gap-6 max-w-[1920px] mx-auto">
         {/* Top Row: Order Book & Bots & News Feed */}
-        <div className="col-span-1 md:col-span-5 lg:col-span-5 space-y-6">
+        <div className="col-span-1 md:col-span-5 lg:col-span-5 space-y-6" data-tour="orderbook">
           <OrderBook />
           <IndicesPanel />
         </div>
-        
-        <div className="col-span-1 md:col-span-4 lg:col-span-4">
+
+        <div className="col-span-1 md:col-span-4 lg:col-span-4" data-tour="bots">
           <SimulatedBots />
         </div>
 
-        <div className="col-span-1 md:col-span-3 lg:col-span-3">
+        <div className="col-span-1 md:col-span-3 lg:col-span-3" data-tour="news">
           <NewsFeed />
         </div>
 
@@ -55,26 +56,26 @@ export default function Dashboard() {
         </div>
 
         {/* Middle Row: PnL Charts (Full Width) */}
-        <div className="col-span-1 md:col-span-12">
+        <div className="col-span-1 md:col-span-12" data-tour="pnl">
             <PnLCharts />
         </div>
 
-        {/* Trades row: global ticker · big trades · my trades */}
-        <div className="col-span-1 md:col-span-4">
-            <GlobalTradeTicker />
-        </div>
-        <div className="col-span-1 md:col-span-4">
-            <BigTrades />
-        </div>
-        <div className="col-span-1 md:col-span-4">
-            <MyTrades />
+        {/* Trades row: global ticker · big trades · my trades. The wrapper is a
+            nested 3-col grid so the tour can spotlight the row as one unit
+            without changing the layout. */}
+        <div className="col-span-1 md:col-span-12 grid grid-cols-1 md:grid-cols-3 gap-6" data-tour="trades">
+          <GlobalTradeTicker />
+          <BigTrades />
+          <MyTrades />
         </div>
 
         {/* Backtester (full width) */}
-        <div className="col-span-1 md:col-span-12">
+        <div className="col-span-1 md:col-span-12" data-tour="backtester">
            <Backtester />
         </div>
       </main>
+
+      <Onboarding />
     </div>
   );
 }
