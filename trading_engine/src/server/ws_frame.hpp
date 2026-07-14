@@ -45,7 +45,13 @@ std::string ws_handshake_response(const std::string& sec_websocket_key,
 
 // Read a full HTTP request from the socket (until \r\n\r\n).
 // Reads only the headers; if a body exists, leaves it on the socket. Returns
-// false on error/EOF/limit-exceeded.
-bool read_http_headers(int sockfd, std::string& out, size_t max_size = 65536);
+// false on error/EOF/limit-exceeded/deadline-exceeded.
+//
+// This runs before any API key is checked, so it is the one piece of the server
+// an unauthenticated stranger can always reach. `timeout_ms` bounds the WHOLE
+// header read, not each ::read: a per-read socket timeout alone still lets a
+// client trickle one byte at a time and hold the connection's thread for days.
+bool read_http_headers(int sockfd, std::string& out, size_t max_size = 65536,
+                       int timeout_ms = 10000);
 
 }

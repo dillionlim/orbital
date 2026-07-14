@@ -6,6 +6,9 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include <sys/time.h>
+
+#include <cstdlib>
 #include <cstring>
 #include <sstream>
 
@@ -63,10 +66,33 @@ std::string get_header(const std::string& req, const std::string& key) {
 
 }  // namespace
 
+namespace {
+
+// Bounds how long an unauthenticated peer may hold a connection (and therefore a
+// thread) while it dawdles through the handshake. Cleared once the peer proves it
+// holds a valid API key — established sessions are legitimately idle for long
+// stretches, waiting on market data.
+constexpr int kHandshakeTimeoutMs = 10000;
+
+void set_socket_timeout(int fd, int ms) {
+    struct timeval tv{};
+    tv.tv_sec = ms / 1000;
+    tv.tv_usec = (ms % 1000) * 1000;
+    ::setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    ::setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+}
+
+}  // namespace
+
 WsServer::WsServer(int port, RestRouter& rest, Dispatcher& dispatcher,
                    ApiKeyAuthenticator& auth, SessionRegistry& sessions, ServerMetrics& metrics)
     : port_(port), rest_(rest), dispatcher_(dispatcher), auth_(auth),
-      sessions_(sessions), metrics_(metrics) {}
+      sessions_(sessions), metrics_(metrics) {
+    if (const char* env = ::getenv("BUBBLES_MAX_CONNECTIONS")) {
+        const int v = ::atoi(env);
+        if (v > 0) max_connections_ = v;
+    }
+}
 
 WsServer::~WsServer() { stop(); }
 
@@ -123,10 +149,28 @@ void WsServer::accept_loop() {
         // Disable Nagle for low-latency frames.
         int one = 1;
         ::setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
+
+        // Refuse past the cap *before* spawning a thread — spawning one is the
+        // cost we are trying to bound.
+        if (open_connections_.fetch_add(1, std::memory_order_relaxed) + 1 > max_connections_) {
+            open_connections_.fetch_sub(1, std::memory_order_relaxed);
+            LOG_WARN("ws_server: connection cap " << max_connections_ << " reached, refusing");
+            const std::string r =
+                http_response(503, "{\"error\":\"server busy\"}", "application/json");
+            ::send(fd, r.data(), r.size(), MSG_NOSIGNAL);
+            ::close(fd);
+            continue;
+        }
+
+        // An unauthenticated peer must not be able to hold this thread open by
+        // simply never speaking. Relaxed after the API key checks out.
+        set_socket_timeout(fd, kHandshakeTimeoutMs);
+
         metrics_.recordConnection();
         std::thread([this, fd] {
             handle_connection(fd);
             metrics_.closeConnection();
+            open_connections_.fetch_sub(1, std::memory_order_relaxed);
         }).detach();
     }
 }
@@ -197,6 +241,12 @@ void WsServer::handle_connection(int sockfd) {
         ::close(sockfd);
         return;
     }
+
+    // The peer holds a valid key, so the handshake deadline has done its job.
+    // Clear it: a live session blocks in ws_read_frame waiting for the client's
+    // next message, and a subscriber that is merely quiet for 10s is not a
+    // slowloris — leaving the timeout on would disconnect every idle bot.
+    set_socket_timeout(sockfd, 0);
 
     // Send 101. If we accepted via subprotocol, the server MUST echo the
     // selected one back per RFC 6455 §4.2.2 — otherwise browsers reject.

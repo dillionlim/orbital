@@ -3,6 +3,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include <chrono>
 #include <cstring>
 #include <sstream>
 #include <vector>
@@ -90,11 +91,19 @@ std::string ws_handshake_response(const std::string& sec_websocket_key,
     return oss.str();
 }
 
-bool read_http_headers(int sockfd, std::string& out, size_t max_size) {
+bool read_http_headers(int sockfd, std::string& out, size_t max_size, int timeout_ms) {
     out.clear();
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
     char buf[1024];
     while (out.size() < max_size) {
+        if (std::chrono::steady_clock::now() >= deadline) {
+            LOG_WARN("read_http_headers: deadline exceeded, dropping connection");
+            return false;
+        }
         ssize_t n = ::read(sockfd, buf, sizeof(buf));
+        // A socket recv timeout surfaces as EAGAIN/EWOULDBLOCK. Treat it like any
+        // other read failure: the caller drops the connection.
         if (n <= 0) return false;
         out.append(buf, buf + n);
         if (out.find("\r\n\r\n") != std::string::npos) return true;
