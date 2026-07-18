@@ -34,18 +34,20 @@ void require_price(Price actual, Price expected, const std::string& message) {
     }
 }
 
-std::unique_ptr<Order> order(OrderId id, OrderSide side, OrderType type,
-                             Quantity quantity, Price price,
-                             std::string user = "user") {
-    auto o = std::make_unique<Order>();
-    o->id = id;
-    o->symbol = 42;
-    o->side = side;
-    o->type = type;
-    o->quantity = quantity;
-    o->limit_price = price;
-    o->user_id = std::move(user);
-    return o;
+// `user` is bound to a string literal at every call site (static storage), so
+// the OrderInput's user_id view stays valid through apply().
+OrderInput order(OrderId id, OrderSide side, OrderType type,
+                 Quantity quantity, Price price,
+                 std::string_view user = "user") {
+    OrderInput in;
+    in.id = id;
+    in.symbol = 42;
+    in.side = side;
+    in.type = type;
+    in.quantity = quantity;
+    in.limit_price = price;
+    in.user_id = user;
+    return in;
 }
 
 // Checks resting bids are aggregated and sorted by best price first.
