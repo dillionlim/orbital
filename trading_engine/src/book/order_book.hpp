@@ -1,13 +1,13 @@
 #pragma once
-#include <list>
+#include <functional>
 #include <map>
-#include <memory>
 #include <string_view>
-#include <unordered_map>
 #include <vector>
 
 #include "book/order.hpp"
+#include "book/order_index.hpp"
 #include "book/price_level.hpp"
+#include "common/object_pool.hpp"
 #include "common/types.hpp"
 
 namespace TradingSystem {
@@ -20,12 +20,17 @@ struct BookLevel {
 class OrderBook {
 public:
     explicit OrderBook(SymbolId symbol) : symbol_(symbol) {}
+    ~OrderBook();
+
+    OrderBook(const OrderBook&) = delete;
+    OrderBook& operator=(const OrderBook&) = delete;
 
     [[nodiscard]] SymbolId symbol_id() const { return symbol_; }
 
-    // Apply a new order. Order is consumed (ownership taken on rest, dropped on full fill / reject).
-    // Caller pre-fills order->id via Sequencer.
-    [[nodiscard]] ApplyResult apply(std::unique_ptr<Order> order);
+    // Apply a new order described by `in`. A pooled Order is materialised only
+    // if a remainder rests; market orders and fully-crossing limits allocate
+    // nothing. Caller pre-fills in.id via Sequencer.
+    [[nodiscard]] ApplyResult apply(const OrderInput& in);
 
     // Cancel by id; user_id must match (unless empty == admin/internal).
     [[nodiscard]] CancelOutcome cancel(OrderId id, std::string_view user_id_must_match);
@@ -40,19 +45,15 @@ public:
     [[nodiscard]] size_t open_orders() const { return by_id_.size(); }
 
 private:
-    struct Resting {
-        std::unique_ptr<Order> order;
-        Price level_price;
-        OrderSide side;
-        std::list<NonOwning<Order>>::iterator level_iter;
-    };
-
-    void erase_resting(OrderId id);
+    // Unlink a resting order from its level, drop it from the id index, and
+    // return it to the pool. Erases the level if it becomes empty.
+    void erase_resting(Order* o);
 
     SymbolId symbol_;
     std::map<Price, PriceLevel, std::greater<Price>> bids_;   // descending
     std::map<Price, PriceLevel> asks_;                         // ascending
-    std::unordered_map<OrderId, Resting> by_id_;
+    ObjectPool<Order> pool_;
+    OrderIndex by_id_;
 };
 
 }

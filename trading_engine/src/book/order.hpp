@@ -1,5 +1,6 @@
 #pragma once
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "common/types.hpp"
@@ -11,6 +12,12 @@ using Bubbles::OrderSide;
 using Bubbles::OrderType;
 using Bubbles::OrderStatus;
 
+struct PriceLevel;
+
+// A resting order. Instances live in OrderBook's ObjectPool and are linked into
+// their PriceLevel via the intrusive prev_/next_ pointers below — there is no
+// separate list node to allocate. Only fields the book needs after the order
+// rests are kept; the transient taker state lives on the stack in apply().
 struct Order {
     OrderId id = 0;
     SymbolId symbol = 0;
@@ -26,9 +33,35 @@ struct Order {
     Timestamp created_ms = 0;
     bool is_internal = false;       // market-maker / system bot
 
+    // Intrusive linkage into the owning PriceLevel's FIFO. Valid only while the
+    // order rests on the book; the level pointer gives O(1) cancel with no map
+    // lookup for the price.
+    Order* prev_ = nullptr;
+    Order* next_ = nullptr;
+    PriceLevel* level_ = nullptr;
+
     [[nodiscard]] Quantity remaining() const {
         return quantity > filled ? quantity - filled : 0;
     }
+};
+
+// What the matching layer submits to OrderBook::apply(). Passing this by const
+// reference (rather than a heap-allocated Order) keeps market orders and fully
+// crossing limits allocation-free — a pooled Order is only materialised if a
+// remainder actually rests. Strings are views: they are copied into the pool
+// exactly once, and only when the order rests.
+struct OrderInput {
+    OrderId id = 0;
+    SymbolId symbol = 0;
+    OrderSide side = OrderSide::Buy;
+    OrderType type = OrderType::Limit;
+    Quantity quantity = 0;
+    Price limit_price = 0.0;
+    std::string_view user_id;
+    std::string_view client_id;
+    std::string_view client_order_id;
+    Timestamp created_ms = 0;
+    bool is_internal = false;
 };
 
 struct FillReport {

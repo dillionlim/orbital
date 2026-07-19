@@ -31,26 +31,26 @@ void MatchingEngine::worker_loop() {
     LOG_INFO("matching shard up: symbol_id=" << symbol_);
 
     auto handle_place = [&](const PlaceOrderCmd& cmd) {
-        auto order = std::make_unique<Order>();
-        order->id = cmd.assigned_id;
-        order->symbol = cmd.symbol;
-        order->side = cmd.side;
-        order->type = cmd.type;
-        order->quantity = cmd.quantity;
-        order->limit_price = cmd.limit_price;
-        order->user_id = cmd.user_id;
-        order->client_id = cmd.client_id;
-        order->client_order_id = cmd.client_order_id;
-        order->created_ms = cmd.ts ? cmd.ts : now_ms();
-        order->is_internal = cmd.is_internal;
-
         const std::string user_id = cmd.user_id;
         const std::string client_id = cmd.client_id;
         const std::string client_order_id = cmd.client_order_id;
         const SessionId sess = cmd.session_id;
         const bool is_internal = cmd.is_internal;
 
-        ApplyResult r = book_.apply(std::move(order));
+        OrderInput in;
+        in.id = cmd.assigned_id;
+        in.symbol = cmd.symbol;
+        in.side = cmd.side;
+        in.type = cmd.type;
+        in.quantity = cmd.quantity;
+        in.limit_price = cmd.limit_price;
+        in.user_id = user_id;
+        in.client_id = client_id;
+        in.client_order_id = client_order_id;
+        in.created_ms = cmd.ts ? cmd.ts : now_ms();
+        in.is_internal = is_internal;
+
+        ApplyResult r = book_.apply(in);
 
         // Emit STP cancellations as CancelAcks so makers know.
         for (const auto& stp : r.stp_cancels) {
