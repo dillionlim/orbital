@@ -16,17 +16,6 @@ namespace TradingSystem {
 
 namespace {
 
-bool read_full(int fd, void* buf, size_t n) {
-    auto* p = static_cast<uint8_t*>(buf);
-    size_t got = 0;
-    while (got < n) {
-        ssize_t r = ::read(fd, p + got, n - got);
-        if (r <= 0) return false;
-        got += r;
-    }
-    return true;
-}
-
 bool write_full(int fd, const void* buf, size_t n) {
     const auto* p = static_cast<const uint8_t*>(buf);
     size_t sent = 0;
@@ -69,6 +58,29 @@ std::string base64_encode(const unsigned char* data, size_t len) {
 }
 
 }  // namespace
+
+bool WsReader::read_full(void* buf, size_t n) {
+    auto* p = static_cast<uint8_t*>(buf);
+    size_t got = 0;
+    // Serve whatever was already pulled off the socket before going back to it.
+    if (pos_ < pending_.size()) {
+        const size_t take = std::min(n, pending_.size() - pos_);
+        std::memcpy(p, pending_.data() + pos_, take);
+        pos_ += take;
+        got = take;
+        if (pos_ == pending_.size()) {
+            pending_.clear();
+            pending_.shrink_to_fit();
+            pos_ = 0;
+        }
+    }
+    while (got < n) {
+        const ssize_t r = ::read(fd_, p + got, n - got);
+        if (r <= 0) return false;
+        got += static_cast<size_t>(r);
+    }
+    return true;
+}
 
 std::string ws_accept_key(const std::string& sec_websocket_key) {
     static const char kGuid[] = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
@@ -113,8 +125,13 @@ bool read_http_headers(int sockfd, std::string& out, size_t max_size, int timeou
 }
 
 bool ws_read_frame(int sockfd, WsFrame& out, size_t max_payload) {
+    WsReader reader(sockfd);
+    return ws_read_frame(reader, out, max_payload);
+}
+
+bool ws_read_frame(WsReader& in, WsFrame& out, size_t max_payload) {
     uint8_t hdr[2];
-    if (!read_full(sockfd, hdr, 2)) return false;
+    if (!in.read_full(hdr, 2)) return false;
     out.fin = (hdr[0] & 0x80) != 0;
     out.opcode = static_cast<WsOpcode>(hdr[0] & 0x0F);
     bool masked = (hdr[1] & 0x80) != 0;
@@ -130,11 +147,11 @@ bool ws_read_frame(int sockfd, WsFrame& out, size_t max_payload) {
     uint64_t len = hdr[1] & 0x7F;
     if (len == 126) {
         uint8_t ext[2];
-        if (!read_full(sockfd, ext, 2)) return false;
+        if (!in.read_full(ext, 2)) return false;
         len = (uint64_t(ext[0]) << 8) | ext[1];
     } else if (len == 127) {
         uint8_t ext[8];
-        if (!read_full(sockfd, ext, 8)) return false;
+        if (!in.read_full(ext, 8)) return false;
         len = 0;
         for (int i = 0; i < 8; ++i) len = (len << 8) | ext[i];
     }
@@ -160,11 +177,11 @@ bool ws_read_frame(int sockfd, WsFrame& out, size_t max_payload) {
     }
     uint8_t mask_key[4] = {0, 0, 0, 0};
     if (masked) {
-        if (!read_full(sockfd, mask_key, 4)) return false;
+        if (!in.read_full(mask_key, 4)) return false;
     }
     out.payload.resize(len);
     if (len > 0) {
-        if (!read_full(sockfd, out.payload.data(), len)) return false;
+        if (!in.read_full(out.payload.data(), len)) return false;
         if (masked) {
             for (uint64_t i = 0; i < len; ++i) {
                 out.payload[i] ^= mask_key[i & 3];
