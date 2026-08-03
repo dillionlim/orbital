@@ -44,6 +44,10 @@ public:
     // client_id, and one user's pause must not cancel another's orders.
     void cancel_orders_for_client(std::string_view user_id, std::string_view client_id);
 
+    // Orders currently attributed to a session. Test seam: order_owner_ is
+    // private and its size is otherwise unobservable.
+    [[nodiscard]] size_t tracked_orders() const;
+
 private:
     void handle_place(SessionPtr s, const InboundPlaceOrder& p);
     void handle_cancel(SessionPtr s, const InboundCancelOrder& c);
@@ -64,7 +68,10 @@ private:
     std::shared_ptr<PositionTracker> positions_;
 
     // OrderId → SessionId for routing maker fills back to original placer.
-    std::mutex order_owner_mu_;
+    // OrderId → owning session, for routing reports the shard cannot attribute
+    // itself (maker fills). Entries are registered before the order reaches the
+    // shard and dropped when it goes terminal.
+    mutable std::mutex order_owner_mu_;
     std::unordered_map<OrderId, SessionId> order_owner_;
 };
 

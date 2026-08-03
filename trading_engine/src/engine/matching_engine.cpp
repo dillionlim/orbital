@@ -36,6 +36,7 @@ void MatchingEngine::worker_loop() {
         const std::string client_order_id = cmd.client_order_id;
         const SessionId sess = cmd.session_id;
         const bool is_internal = cmd.is_internal;
+        const bool is_market = (cmd.type == OrderType::Market);
 
         OrderInput in;
         in.id = cmd.assigned_id;
@@ -58,8 +59,15 @@ void MatchingEngine::worker_loop() {
             e.kind = ExecutionReport::Kind::CancelAck;
             e.order_id = stp.order_id;
             e.symbol = stp.symbol;
+            e.side = stp.side;
             e.user_id = stp.user_id;
             e.status = OrderStatus::Cancelled;
+            // The cancelled order's real book state. Left at zero these fields
+            // overwrite the persisted row's filled_qty with 0 (see SqliteStore's
+            // UPSERT), so a partially filled order that gets cancelled reads back
+            // as if it had never traded.
+            e.remaining = stp.remaining;
+            e.total_filled = stp.filled;
             e.reason = stp.reason;
             e.ts = now_ms();
             // session_id unknown here; broadcaster will look up by user_id+order_id.
@@ -162,6 +170,15 @@ void MatchingEngine::worker_loop() {
             me.last_price = fill.price;
             me.last_quantity = fill.quantity;
             me.remaining = fill.maker_remaining;
+            // A resting order is always a limit sitting at the level it trades on,
+            // so its limit and its volume-weighted average fill price are both the
+            // fill price. Without these, SqliteStore's UPSERT writes the defaults
+            // (0) over the row's filled_qty and avg_price, and every maker order
+            // ends up persisted as "Filled, filled_qty 0".
+            me.type = OrderType::Limit;
+            me.limit_price = fill.price;
+            me.total_filled = fill.maker_filled;
+            me.avg_price = fill.price;
             me.trade_id = fill.trade_id;
             me.user_id = fill.maker_user_id;
             me.client_id = fill.maker_client_id;
@@ -170,6 +187,34 @@ void MatchingEngine::worker_loop() {
                 ? OrderStatus::Filled : OrderStatus::PartiallyFilled;
             bus_.publish(me);
         }
+
+        // A market order never rests, so whatever is left when the sweep runs out
+        // of crossable liquidity is dead on arrival. Nothing else emits a terminal
+        // event for it: the last Fill carries status PartiallyFilled, and no
+        // CancelAck follows. Subscribers that reserve against the Ack (position
+        // limits) would hold that reservation forever, and the client would never
+        // learn the order is finished. Close it out explicitly.
+        if (is_market && r.status == OrderStatus::PartiallyFilled) {
+            ExecutionReport dead;
+            dead.kind = ExecutionReport::Kind::CancelAck;
+            dead.order_id = cmd.assigned_id;
+            dead.client_order_id = client_order_id;
+            dead.session_id = sess;
+            dead.symbol = cmd.symbol;
+            dead.side = cmd.side;
+            dead.type = cmd.type;
+            dead.status = OrderStatus::Cancelled;
+            dead.remaining = cmd.quantity - total_filled;
+            dead.total_filled = total_filled;
+            dead.avg_price = r.avg_price;
+            dead.reason = "unfilled_market_remainder";
+            dead.user_id = user_id;
+            dead.client_id = client_id;
+            dead.ts = now_ms();
+            dead.is_internal = is_internal;
+            bus_.publish(dead);
+        }
+
         publish_book_change();
     };
 
@@ -184,6 +229,9 @@ void MatchingEngine::worker_loop() {
         if (co.ok) {
             e.kind = ExecutionReport::Kind::CancelAck;
             e.status = OrderStatus::Cancelled;
+            e.side = co.side;
+            e.remaining = co.remaining;
+            e.total_filled = co.filled;
             bus_.publish(e);
             publish_book_change();
         } else {
