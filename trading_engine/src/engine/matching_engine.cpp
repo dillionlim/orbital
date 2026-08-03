@@ -36,6 +36,7 @@ void MatchingEngine::worker_loop() {
         const std::string client_order_id = cmd.client_order_id;
         const SessionId sess = cmd.session_id;
         const bool is_internal = cmd.is_internal;
+        const bool is_market = (cmd.type == OrderType::Market);
 
         OrderInput in;
         in.id = cmd.assigned_id;
@@ -170,6 +171,34 @@ void MatchingEngine::worker_loop() {
                 ? OrderStatus::Filled : OrderStatus::PartiallyFilled;
             bus_.publish(me);
         }
+
+        // A market order never rests, so whatever is left when the sweep runs out
+        // of crossable liquidity is dead on arrival. Nothing else emits a terminal
+        // event for it: the last Fill carries status PartiallyFilled, and no
+        // CancelAck follows. Subscribers that reserve against the Ack (position
+        // limits) would hold that reservation forever, and the client would never
+        // learn the order is finished. Close it out explicitly.
+        if (is_market && r.status == OrderStatus::PartiallyFilled) {
+            ExecutionReport dead;
+            dead.kind = ExecutionReport::Kind::CancelAck;
+            dead.order_id = cmd.assigned_id;
+            dead.client_order_id = client_order_id;
+            dead.session_id = sess;
+            dead.symbol = cmd.symbol;
+            dead.side = cmd.side;
+            dead.type = cmd.type;
+            dead.status = OrderStatus::Cancelled;
+            dead.remaining = cmd.quantity - total_filled;
+            dead.total_filled = total_filled;
+            dead.avg_price = r.avg_price;
+            dead.reason = "unfilled_market_remainder";
+            dead.user_id = user_id;
+            dead.client_id = client_id;
+            dead.ts = now_ms();
+            dead.is_internal = is_internal;
+            bus_.publish(dead);
+        }
+
         publish_book_change();
     };
 
