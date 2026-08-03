@@ -3,6 +3,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstring>
 #include <sstream>
@@ -14,17 +15,6 @@
 namespace TradingSystem {
 
 namespace {
-
-bool read_full(int fd, void* buf, size_t n) {
-    auto* p = static_cast<uint8_t*>(buf);
-    size_t got = 0;
-    while (got < n) {
-        ssize_t r = ::read(fd, p + got, n - got);
-        if (r <= 0) return false;
-        got += r;
-    }
-    return true;
-}
 
 bool write_full(int fd, const void* buf, size_t n) {
     const auto* p = static_cast<const uint8_t*>(buf);
@@ -69,6 +59,29 @@ std::string base64_encode(const unsigned char* data, size_t len) {
 
 }  // namespace
 
+bool WsReader::read_full(void* buf, size_t n) {
+    auto* p = static_cast<uint8_t*>(buf);
+    size_t got = 0;
+    // Serve whatever was already pulled off the socket before going back to it.
+    if (pos_ < pending_.size()) {
+        const size_t take = std::min(n, pending_.size() - pos_);
+        std::memcpy(p, pending_.data() + pos_, take);
+        pos_ += take;
+        got = take;
+        if (pos_ == pending_.size()) {
+            pending_.clear();
+            pending_.shrink_to_fit();
+            pos_ = 0;
+        }
+    }
+    while (got < n) {
+        const ssize_t r = ::read(fd_, p + got, n - got);
+        if (r <= 0) return false;
+        got += static_cast<size_t>(r);
+    }
+    return true;
+}
+
 std::string ws_accept_key(const std::string& sec_websocket_key) {
     static const char kGuid[] = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
     std::string concat = sec_websocket_key + kGuid;
@@ -112,8 +125,13 @@ bool read_http_headers(int sockfd, std::string& out, size_t max_size, int timeou
 }
 
 bool ws_read_frame(int sockfd, WsFrame& out, size_t max_payload) {
+    WsReader reader(sockfd);
+    return ws_read_frame(reader, out, max_payload);
+}
+
+bool ws_read_frame(WsReader& in, WsFrame& out, size_t max_payload) {
     uint8_t hdr[2];
-    if (!read_full(sockfd, hdr, 2)) return false;
+    if (!in.read_full(hdr, 2)) return false;
     out.fin = (hdr[0] & 0x80) != 0;
     out.opcode = static_cast<WsOpcode>(hdr[0] & 0x0F);
     bool masked = (hdr[1] & 0x80) != 0;
@@ -129,13 +147,29 @@ bool ws_read_frame(int sockfd, WsFrame& out, size_t max_payload) {
     uint64_t len = hdr[1] & 0x7F;
     if (len == 126) {
         uint8_t ext[2];
-        if (!read_full(sockfd, ext, 2)) return false;
+        if (!in.read_full(ext, 2)) return false;
         len = (uint64_t(ext[0]) << 8) | ext[1];
     } else if (len == 127) {
         uint8_t ext[8];
-        if (!read_full(sockfd, ext, 8)) return false;
+        if (!in.read_full(ext, 8)) return false;
         len = 0;
         for (int i = 0; i < 8; ++i) len = (len << 8) | ext[i];
+    }
+    // RFC 6455 §5.5: a control frame (opcode with the high bit set — Close, Ping,
+    // Pong, and the reserved 0xB-0xF) carries at most 125 bytes and must never be
+    // fragmented. Both rules exist so a peer can always handle a control frame
+    // immediately, without buffering. Accepting the violations let a client park
+    // an unbounded ping payload in memory and have the server echo it straight
+    // back as a pong, itself an invalid frame.
+    if (is_control_opcode(out.opcode)) {
+        if (!out.fin) {
+            LOG_WARN("ws_read_frame: fragmented control frame, dropping connection");
+            return false;
+        }
+        if (len > kMaxControlPayload) {
+            LOG_WARN("ws_read_frame: control payload " << len << " exceeds 125");
+            return false;
+        }
     }
     if (len > max_payload) {
         LOG_WARN("ws_read_frame: payload " << len << " exceeds limit " << max_payload);
@@ -143,11 +177,11 @@ bool ws_read_frame(int sockfd, WsFrame& out, size_t max_payload) {
     }
     uint8_t mask_key[4] = {0, 0, 0, 0};
     if (masked) {
-        if (!read_full(sockfd, mask_key, 4)) return false;
+        if (!in.read_full(mask_key, 4)) return false;
     }
     out.payload.resize(len);
     if (len > 0) {
-        if (!read_full(sockfd, out.payload.data(), len)) return false;
+        if (!in.read_full(out.payload.data(), len)) return false;
         if (masked) {
             for (uint64_t i = 0; i < len; ++i) {
                 out.payload[i] ^= mask_key[i & 3];
@@ -158,6 +192,13 @@ bool ws_read_frame(int sockfd, WsFrame& out, size_t max_payload) {
 }
 
 bool ws_write_frame(int sockfd, const WsFrame& frame) {
+    // Same rule on the way out: emitting an over-long or fragmented control frame
+    // would have the peer drop us for a protocol violation.
+    if (is_control_opcode(frame.opcode) &&
+        (!frame.fin || frame.payload.size() > kMaxControlPayload)) {
+        LOG_WARN("ws_write_frame: refusing to send an invalid control frame");
+        return false;
+    }
     std::vector<uint8_t> hdr;
     hdr.reserve(10);
     uint8_t b0 = (frame.fin ? 0x80 : 0x00) | (static_cast<uint8_t>(frame.opcode) & 0x0F);
@@ -195,6 +236,9 @@ bool ws_write_close(int sockfd, uint16_t code, std::string_view reason) {
     f.opcode = WsOpcode::Close;
     f.payload.push_back(static_cast<char>((code >> 8) & 0xFF));
     f.payload.push_back(static_cast<char>(code & 0xFF));
+    // The 2-byte status code eats into the 125-byte control budget. Trim the
+    // reason rather than drop the close: the status code is the part that matters.
+    reason = reason.substr(0, std::min(reason.size(), kMaxControlPayload - 2));
     f.payload.append(reason);
     return ws_write_frame(sockfd, f);
 }
@@ -202,7 +246,9 @@ bool ws_write_close(int sockfd, uint16_t code, std::string_view reason) {
 bool ws_write_pong(int sockfd, std::string_view payload) {
     WsFrame f;
     f.opcode = WsOpcode::Pong;
-    f.payload.assign(payload);
+    // A pong echoes the ping's application data, which ws_read_frame already
+    // bounds at 125 — belt and braces for any other caller.
+    f.payload.assign(payload.substr(0, std::min(payload.size(), kMaxControlPayload)));
     return ws_write_frame(sockfd, f);
 }
 

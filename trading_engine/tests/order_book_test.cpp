@@ -252,6 +252,53 @@ void cancels_partially_filled_resting_order_and_keeps_level_qty_honest() {
     require_eq(book.open_orders(), static_cast<size_t>(1), "only the untouched maker is open");
 }
 
+// Everything a downstream consumer needs to describe what happened to the maker
+// has to come off the FillReport/CancelOutcome — the book is the only place that
+// knows. Leaving these at their defaults strands the persisted order row at
+// filled_qty 0 and reports every cancel as a Buy.
+void reports_the_makers_own_fill_state_on_fills_and_cancels() {
+    OrderBook book{42};
+    auto maker = book.apply(order(90, OrderSide::Sell, OrderType::Limit, 10, 100.0, "maker"));
+    require_eq(maker.status, OrderStatus::Pending, "maker should rest");
+
+    auto taker = book.apply(order(91, OrderSide::Buy, OrderType::Limit, 4, 100.0, "taker"));
+    require_eq(taker.fills.size(), static_cast<size_t>(1), "one fill against the maker");
+    require_eq(taker.fills[0].maker_remaining, static_cast<Quantity>(6),
+               "fill carries the maker's post-fill residual");
+    require_eq(taker.fills[0].maker_filled, static_cast<Quantity>(4),
+               "fill carries the maker's post-fill cumulative quantity");
+
+    auto again = book.apply(order(92, OrderSide::Buy, OrderType::Limit, 3, 100.0, "taker2"));
+    require_eq(again.fills[0].maker_filled, static_cast<Quantity>(7),
+               "cumulative filled accumulates across fills, it is not per-fill");
+    require_eq(again.fills[0].maker_remaining, static_cast<Quantity>(3),
+               "residual keeps shrinking alongside it");
+
+    auto cancelled = book.cancel(90, "maker");
+    require(cancelled.ok, "partially filled maker should cancel");
+    require_eq(cancelled.remaining, static_cast<Quantity>(3), "cancel reports the remainder");
+    require_eq(cancelled.filled, static_cast<Quantity>(7),
+               "cancel reports how much had already executed");
+    require_eq(cancelled.side, OrderSide::Sell, "cancel reports the order's real side");
+}
+
+// Self-trade prevention cancels the maker mid-book; the outcome it hands back
+// has to describe that maker just as fully as an explicit cancel does.
+void reports_maker_fill_state_on_self_trade_prevention() {
+    OrderBook book{42};
+    require_eq(book.apply(order(95, OrderSide::Sell, OrderType::Limit, 10, 100.0, "solo")).status,
+               OrderStatus::Pending, "maker should rest");
+    // A different user trades against it first, so it is partially filled.
+    (void)book.apply(order(96, OrderSide::Buy, OrderType::Limit, 4, 100.0, "other"));
+
+    // Now the owner crosses its own resting order.
+    auto self = book.apply(order(97, OrderSide::Buy, OrderType::Limit, 2, 100.0, "solo"));
+    require_eq(self.stp_cancels.size(), static_cast<size_t>(1), "the maker is cancelled by STP");
+    require_eq(self.stp_cancels[0].remaining, static_cast<Quantity>(6), "residual at cancel time");
+    require_eq(self.stp_cancels[0].filled, static_cast<Quantity>(4), "already-executed quantity");
+    require_eq(self.stp_cancels[0].side, OrderSide::Sell, "the maker's real side");
+}
+
 // Cancelling an id the book has never seen is reported as not_found.
 void rejects_cancel_of_unknown_order() {
     OrderBook book{42};
@@ -417,6 +464,10 @@ const std::vector<TestCase>& test_cases() {
          partially_fills_crossing_limit_and_rests_remainder},
         {"cancels_partially_filled_resting_order_and_keeps_level_qty_honest",
          cancels_partially_filled_resting_order_and_keeps_level_qty_honest},
+        {"reports_the_makers_own_fill_state_on_fills_and_cancels",
+         reports_the_makers_own_fill_state_on_fills_and_cancels},
+        {"reports_maker_fill_state_on_self_trade_prevention",
+         reports_maker_fill_state_on_self_trade_prevention},
         {"rejects_cancel_of_unknown_order", rejects_cancel_of_unknown_order},
         {"allows_internal_cancel_to_bypass_owner_check",
          allows_internal_cancel_to_bypass_owner_check},
