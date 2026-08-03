@@ -3,6 +3,7 @@
 #include <concepts>
 #include <functional>
 #include <mutex>
+#include <shared_mutex>
 #include <utility>
 #include <vector>
 
@@ -14,9 +15,17 @@ namespace TradingSystem {
 template <typename H>
 concept EventHandler = std::invocable<H, const OutboundEvent&>;
 
-// Synchronous fan-out, but publishes use a snapshot of the subscriber list so
-// matching threads don't serialize on subscribe/unsubscribe. Subscribers should
-// still keep their callbacks fast (push to their own queue and return).
+// Synchronous fan-out. Publishes take the lock in shared mode, so matching
+// threads still fan out concurrently with each other; only subscribe and
+// unsubscribe are exclusive. Subscribers should keep their callbacks fast (push
+// to their own queue and return).
+//
+// unsubscribe() blocks until every in-flight publish has finished, which is what
+// makes it safe to destroy a subscriber right after unsubscribing — every
+// subscriber here captures `this`, so a callback that outlives its owner is a
+// use-after-free. Callbacks therefore must not call back into the bus
+// (subscribe, unsubscribe, or publish): re-entering while holding the shared
+// lock deadlocks against any waiting writer.
 class EventBus {
 public:
     using Handler = std::function<void(const OutboundEvent&)>;
@@ -24,30 +33,26 @@ public:
 
     template <EventHandler H>
     SubscriberId subscribe(H&& cb) {
-        std::lock_guard<std::mutex> lk(mu_);
+        std::unique_lock<std::shared_mutex> lk(mu_);
         SubscriberId id = ++next_id_;
         subs_.emplace_back(id, Handler{std::forward<H>(cb)});
         return id;
     }
 
     void unsubscribe(SubscriberId id) {
-        std::lock_guard<std::mutex> lk(mu_);
+        std::unique_lock<std::shared_mutex> lk(mu_);
         subs_.erase(std::remove_if(subs_.begin(), subs_.end(),
                                    [&](auto& p) { return p.first == id; }),
                     subs_.end());
     }
 
     void publish(const OutboundEvent& ev) {
-        std::vector<std::pair<SubscriberId, Handler>> snap;
-        {
-            std::lock_guard<std::mutex> lk(mu_);
-            snap = subs_;
-        }
-        for (auto& [_, cb] : snap) cb(ev);
+        std::shared_lock<std::shared_mutex> lk(mu_);
+        for (const auto& [_, cb] : subs_) cb(ev);
     }
 
 private:
-    std::mutex mu_;
+    std::shared_mutex mu_;
     SubscriberId next_id_ = 0;
     std::vector<std::pair<SubscriberId, Handler>> subs_;
 };

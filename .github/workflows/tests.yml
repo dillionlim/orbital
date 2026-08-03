@@ -95,7 +95,8 @@ jobs:
         run: >
           cmake --build ./build/tests
           --target order_book_tests matching_engine_tests mpsc_ring_tests session_tests
-          protocol_tests ws_frame_tests auth_tests news_symbol_tests
+          protocol_tests ws_frame_tests auth_tests news_symbol_tests json_escape_tests
+          event_bus_tests sequencer_tests dispatcher_tests
           -- -j"$(nproc)"
 
       - name: Run ctest
