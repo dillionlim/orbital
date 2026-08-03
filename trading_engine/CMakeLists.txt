@@ -259,6 +259,15 @@ add_engine_test_case(sequencer_tests drops_routing_entries_once_an_order_is_fill
 add_engine_test_case(sequencer_tests keeps_no_routing_entry_for_a_rejected_place)
 add_engine_test_case(sequencer_tests rejects_an_unknown_cancel_without_deadlocking)
 
+add_executable(event_bus_tests EXCLUDE_FROM_ALL
+    tests/event_bus_test.cpp
+)
+configure_engine_test(event_bus_tests)
+add_engine_test_case(event_bus_tests unsubscribe_waits_for_an_in_flight_callback)
+add_engine_test_case(event_bus_tests never_invokes_a_callback_after_unsubscribe_returns)
+add_engine_test_case(event_bus_tests lets_publishes_overlap)
+add_engine_test_case(event_bus_tests survives_concurrent_publish_and_mutation)
+
 add_executable(news_symbol_tests EXCLUDE_FROM_ALL
     tests/news_symbol_test.cpp
     src/news_bot/gemini_client.cpp
