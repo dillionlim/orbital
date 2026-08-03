@@ -97,6 +97,41 @@ describe('applyDelta', () => {
     expect(cold.seq).toBe(0);
   });
 
+  // A gap doesn't advance seq, so every delta behind it is also a gap. Reporting
+  // each one sends another subscribe frame, which makes the engine send another
+  // snapshot — one dropped publish becomes a resync per delta until the first
+  // reply lands, and on a busy symbol that is a self-sustaining storm.
+  it('reports a gap once and stays quiet until the snapshot lands', () => {
+    const state = createBookState();
+    applySnapshot(state, snapshot(5, [[100, 1]], []));
+
+    expect(applyDelta(state, delta(7, [[100, 99]]))).toBe('gap');
+    // Everything arriving while the resync is in flight is still gapped, but
+    // asking again would be pure amplification.
+    expect(applyDelta(state, delta(8, [[100, 98]]))).toBe('waiting');
+    expect(applyDelta(state, delta(9, [[100, 97]]))).toBe('waiting');
+    expect(applyDelta(state, delta(50, [[100, 96]]))).toBe('waiting');
+    expect([...state.bids]).toEqual([[100, 1]]);
+    expect(state.seq).toBe(5);
+  });
+
+  // Once the snapshot arrives the stream is contiguous again, and a later gap is
+  // a genuinely new one that has to be reported.
+  it('re-arms the gap report after a snapshot rebases the book', () => {
+    const state = createBookState();
+    applySnapshot(state, snapshot(5, [[100, 1]], []));
+
+    expect(applyDelta(state, delta(7, [[100, 99]]))).toBe('gap');
+    expect(applyDelta(state, delta(8, [[100, 98]]))).toBe('waiting');
+
+    applySnapshot(state, snapshot(20, [[100, 5]], []));
+    expect(state.resyncPending).toBe(false);
+    expect(applyDelta(state, delta(21, [[100, 6]]))).toBe('applied');
+
+    // A fresh gap after recovery is reported, not swallowed.
+    expect(applyDelta(state, delta(30, [[100, 7]]))).toBe('gap');
+  });
+
   // The whole point of surviving a stale delta: the stream keeps flowing once
   // the sequence catches up, with no snapshot round-trip in between.
   it('resumes applying once the sequence catches up after a stale delta', () => {

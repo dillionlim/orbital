@@ -89,7 +89,8 @@ export const OrderBook: React.FC = () => {
           applySnapshot(bookRef.current, msg);
         } else {
           const outcome = applyDelta(bookRef.current, msg);
-          if (outcome === 'stale') return;  // already applied; nothing changed
+          if (outcome === 'stale') return;   // already applied; nothing changed
+          if (outcome === 'waiting') return; // gapped, resync already in flight
           if (outcome === 'gap') {
             stream.resync('book', symbol);
             return;  // wait for the snapshot reply; don't apply this delta

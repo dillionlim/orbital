@@ -15,27 +15,41 @@ export interface BookState {
   bids: Map<number, number>;
   asks: Map<number, number>;
   seq: number;
+  // Set when a gap has been reported and cleared by the next snapshot. A gap
+  // does not advance seq, so every delta that arrives before the replacement
+  // snapshot lands is also a gap — without this latch each one asks for another
+  // snapshot, and a single missed publish turns into a resync per delta.
+  resyncPending: boolean;
 }
 
 // 'applied' — state advanced. 'stale' — already covered by the snapshot, ignore.
-// 'gap'    — we missed a publish; the caller must ask for a fresh snapshot.
-export type DeltaOutcome = 'applied' | 'stale' | 'gap';
+// 'gap'     — we missed a publish; the caller must ask for a fresh snapshot.
+// 'waiting' — still gapped, but a resync was already requested. Ignore it; the
+//             snapshot already in flight will cover this delta too.
+export type DeltaOutcome = 'applied' | 'stale' | 'gap' | 'waiting';
 
 export function createBookState(): BookState {
-  return { bids: new Map(), asks: new Map(), seq: 0 };
+  return { bids: new Map(), asks: new Map(), seq: 0, resyncPending: false };
 }
 
 export function applySnapshot(state: BookState, msg: EngineBookMessage): void {
   state.bids = new Map(msg.bids);
   state.asks = new Map(msg.asks);
   state.seq = msg.seq;
+  // The snapshot is the resync we were waiting for; deltas from here are
+  // contiguous again, and a later gap is a genuinely new one.
+  state.resyncPending = false;
 }
 
 export function applyDelta(state: BookState, msg: EngineBookDeltaMessage): DeltaOutcome {
   // A delta at or behind our seq is already baked into the snapshot we hold.
   // Resyncing on those turns one early/duplicate publish into a resync storm.
   if (msg.seq <= state.seq) return 'stale';
-  if (msg.seq !== state.seq + 1) return 'gap';
+  if (msg.seq !== state.seq + 1) {
+    if (state.resyncPending) return 'waiting';
+    state.resyncPending = true;
+    return 'gap';
+  }
 
   applyChanges(state.bids, msg.bids);
   applyChanges(state.asks, msg.asks);
