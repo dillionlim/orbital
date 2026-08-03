@@ -222,6 +222,19 @@ add_engine_test_case(matching_engine_tests rejects_market_order_when_book_is_emp
 add_engine_test_case(matching_engine_tests emits_ack_fills_trade_print_and_book_delta_for_a_match)
 add_engine_test_case(matching_engine_tests publishes_book_delta_when_self_trade_prevention_empties_the_book)
 
+add_executable(sequencer_tests EXCLUDE_FROM_ALL
+    tests/sequencer_test.cpp
+    src/engine/sequencer.cpp
+    src/engine/matching_engine.cpp
+    src/book/order_book.cpp
+    src/common/config.cpp
+)
+configure_engine_test(sequencer_tests)
+add_engine_test_case(sequencer_tests drops_routing_entries_once_an_order_is_cancelled)
+add_engine_test_case(sequencer_tests drops_routing_entries_once_an_order_is_filled)
+add_engine_test_case(sequencer_tests keeps_no_routing_entry_for_a_rejected_place)
+add_engine_test_case(sequencer_tests rejects_an_unknown_cancel_without_deadlocking)
+
 add_executable(news_symbol_tests EXCLUDE_FROM_ALL
     tests/news_symbol_test.cpp
     src/news_bot/gemini_client.cpp
