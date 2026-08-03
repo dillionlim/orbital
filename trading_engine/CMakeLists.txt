@@ -222,6 +222,15 @@ add_engine_test_case(matching_engine_tests rejects_market_order_when_book_is_emp
 add_engine_test_case(matching_engine_tests emits_ack_fills_trade_print_and_book_delta_for_a_match)
 add_engine_test_case(matching_engine_tests publishes_book_delta_when_self_trade_prevention_empties_the_book)
 
+add_executable(event_bus_tests EXCLUDE_FROM_ALL
+    tests/event_bus_test.cpp
+)
+configure_engine_test(event_bus_tests)
+add_engine_test_case(event_bus_tests unsubscribe_waits_for_an_in_flight_callback)
+add_engine_test_case(event_bus_tests never_invokes_a_callback_after_unsubscribe_returns)
+add_engine_test_case(event_bus_tests lets_publishes_overlap)
+add_engine_test_case(event_bus_tests survives_concurrent_publish_and_mutation)
+
 add_executable(news_symbol_tests EXCLUDE_FROM_ALL
     tests/news_symbol_test.cpp
     src/news_bot/gemini_client.cpp
