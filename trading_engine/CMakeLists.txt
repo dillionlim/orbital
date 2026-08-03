@@ -268,6 +268,15 @@ add_engine_test_case(event_bus_tests never_invokes_a_callback_after_unsubscribe_
 add_engine_test_case(event_bus_tests lets_publishes_overlap)
 add_engine_test_case(event_bus_tests survives_concurrent_publish_and_mutation)
 
+add_executable(json_escape_tests EXCLUDE_FROM_ALL
+    tests/json_escape_test.cpp
+)
+configure_engine_test(json_escape_tests)
+add_engine_test_case(json_escape_tests leaves_ordinary_values_alone)
+add_engine_test_case(json_escape_tests escapes_the_characters_that_break_out_of_a_string)
+add_engine_test_case(json_escape_tests keeps_hostile_query_and_path_values_inside_the_string)
+add_engine_test_case(json_escape_tests passes_utf8_through_unchanged)
+
 add_executable(news_symbol_tests EXCLUDE_FROM_ALL
     tests/news_symbol_test.cpp
     src/news_bot/gemini_client.cpp
