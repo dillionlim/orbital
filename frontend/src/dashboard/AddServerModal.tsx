@@ -22,17 +22,17 @@ export const AddServerModal: React.FC<AddServerModalProps> = ({ onClose, onSave,
 
   const checkHealthcheck = useCallback(async (ip: string): Promise<boolean> => {
     if (!ip.trim()) return false;
-    
-    
+
+
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 3000);
-      
+
       const response = await fetch(`${httpBase(ip)}/health?_t=${Date.now()}`, {
         method: 'GET',
         signal: controller.signal
       });
-      
+
       clearTimeout(timeoutId);
       return response.ok && (await response.json()).status === 'healthy';
     } catch {
@@ -104,8 +104,8 @@ export const AddServerModal: React.FC<AddServerModalProps> = ({ onClose, onSave,
             }}
             onKeyDown={(e) => e.key === 'Enter' && canSave && handleSave()}
             className={`w-full bg-slate-900 border rounded-md px-3 py-2 text-white placeholder-slate-500 focus:outline-none focus:ring-2 ${
-              healthStatus === 'unhealthy' ? 'border-red-500 focus:ring-red-500' : 
-              healthStatus === 'healthy' ? 'border-green-500 focus:ring-green-500' : 
+              healthStatus === 'unhealthy' ? 'border-red-500 focus:ring-red-500' :
+              healthStatus === 'healthy' ? 'border-green-500 focus:ring-green-500' :
               'border-slate-700 focus:ring-blue-500'
             }`}
           />

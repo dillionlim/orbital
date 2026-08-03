@@ -13,25 +13,25 @@ export default function BubblesIcon(props: SVGProps<SVGSVGElement>) {
         <mask id="arc-subtraction-mask">
           {/* Fill the whole canvas with white so the whole circle is visible by default */}
           <rect x="2500" y="300" width="1500" height="1500" fill="#FFFFFF" />
-          
+
           {/* Draws transparent arc */}
-          <path 
-            d="M3080.76 789C3274.61 788.865 3431.86 945.903 3432 1139.75 3432 1140.3 3432 1140.85 3432 1141.4" 
-            stroke="#000000" 
-            strokeWidth="64.1667" 
-            strokeLinecap="round" 
-            fill="none" 
+          <path
+            d="M3080.76 789C3274.61 788.865 3431.86 945.903 3432 1139.75 3432 1140.3 3432 1140.85 3432 1141.4"
+            stroke="#000000"
+            strokeWidth="64.1667"
+            strokeLinecap="round"
+            fill="none"
           />
         </mask>
       </defs>
 
       {/* SVG layer translation */}
       <g transform="translate(-2595 -389)">
-        
+
         {/* Main Bubble Circle */}
-        <path 
-          d="M2618 1133C2618 874.531 2828.87 665 3089 665 3349.13 665 3560 874.531 3560 1133 3560 1391.47 3349.13 1601 3089 1601 2828.87 1601 2618 1391.47 2618 1133Z" 
-          fill="currentColor" 
+        <path
+          d="M2618 1133C2618 874.531 2828.87 665 3089 665 3349.13 665 3560 874.531 3560 1133 3560 1391.47 3349.13 1601 3089 1601 2828.87 1601 2618 1391.47 2618 1133Z"
+          fill="currentColor"
           mask="url(#arc-subtraction-mask)"
         />
 

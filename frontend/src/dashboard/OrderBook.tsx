@@ -40,7 +40,7 @@ export const OrderBook: React.FC = () => {
   const { names: symbolNames } = useSymbols();
 
   // If the engine doesn't know the currently-selected symbol (server switch
-  // to a config that doesn't define BTC-USD, for example), snap to the
+  // to a config that doesn't define ES, for example), snap to the
   // first symbol the server *does* offer. Skip when the list is still
   // loading so we don't churn on first mount.
   useEffect(() => {

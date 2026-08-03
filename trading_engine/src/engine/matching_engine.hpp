@@ -28,10 +28,6 @@ public:
 
     [[nodiscard]] SymbolId symbol() const { return symbol_; }
 
-    // Read-only snapshot for /orderbook REST handler. NOT thread-safe vs the worker;
-    // the engine publishes BookSnapshotEvents via EventBus on each change, and a
-    // separate snapshot cache caches them for REST consumers.
-    [[nodiscard]] const OrderBook& book_unsafe() const { return book_; }
 
 private:
     void worker_loop();

@@ -5,7 +5,7 @@
 #   build stage   →  ubuntu:24.04, full toolchain, produces a portable engine
 #                    binary (libstdc++/sqlite already statically linked by
 #                    CMakeLists.txt; only glibc + libm dynamic).
-#   runtime stage →  debian:12-slim, just the binary + a default config.
+#   runtime stage →  debian:trixie-slim, just the binary + a default config.
 #
 # Build: `bash scripts/build-image.sh`  (wraps `docker build` + `docker save`).
 # Run:   docker run -p 9090:9090 -v engine-data:/data \
@@ -39,10 +39,10 @@ RUN cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
 
 # ---- Runtime stage -------------------------------------------------------
 #
-# debian:12-slim ships glibc 2.36, which is fine — the build stage produced
-# a binary that targets the build host's glibc (Ubuntu 24.04 → glibc 2.39),
-# so the runtime image's glibc must be ≥ 2.39. We swap the runtime to
-# debian:trixie-slim (glibc 2.41) to stay forward-compatible.
+# The build stage produces a binary targeting the build host's glibc
+# (Ubuntu 24.04 → glibc 2.39), so the runtime image's glibc must be ≥ 2.39.
+# That rules out debian:12-slim (glibc 2.36); we use debian:trixie-slim
+# (glibc 2.41) instead.
 
 FROM debian:trixie-slim AS runtime
 

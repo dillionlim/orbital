@@ -162,7 +162,7 @@ std::string RestRouter::handle(std::string_view request) {
 
 // GET /symbols — anonymous-friendly. Returns the registry as configured at
 // boot so the frontend can populate symbol pickers/subscriptions instead of
-// hardcoding the BTC/ETH/LTC default trio.
+// hardcoding a default symbol list.
 std::string RestRouter::handle_symbols() {
     std::ostringstream oss;
     oss << "{\"symbols\":[";
@@ -252,7 +252,7 @@ std::string RestRouter::handle_trades(std::string_view path) {
 }
 
 std::string RestRouter::handle_historical_trades(std::string_view path) {
-    // Query params: symbol (e.g. "BTC-USD" or "btc"), from (ms), to (ms), limit.
+    // Query params: symbol (e.g. "ES" or "es"), from (ms), to (ms), limit.
     // All optional. The store hard-caps limit at 50_000.
     std::string sym_q   = parse_query_param(path, "symbol");
     std::string from_s  = parse_query_param(path, "from");
@@ -270,7 +270,7 @@ std::string RestRouter::handle_historical_trades(std::string_view path) {
     try_uint(limit_s, limit);
     limit = std::clamp<std::size_t>(limit, 1, 50000);
 
-    // Resolve a friendly symbol (e.g. "btc" → "BTC-USD") into the canonical
+    // Resolve a friendly symbol (e.g. "es" → "ES") into the canonical
     // name SQLite has indexed; pass empty string for "all symbols".
     std::string canonical;
     if (!sym_q.empty()) {
@@ -553,7 +553,13 @@ std::string RestRouter::handle_orderbook(std::string_view path, std::string_view
     }
 
     std::string sym_q = parse_query_param(path, "symbol");
-    if (sym_q.empty()) sym_q = "BTC";
+    if (sym_q.empty()) {
+        // No sensible default: a book is per-instrument. This used to fall back
+        // to "BTC", which isn't a configured symbol, so it returned an empty
+        // book labelled with an instrument the exchange doesn't list.
+        return http_response(400, "{\"error\":\"symbol query parameter is required\"}",
+                             "application/json");
+    }
 
     // Try the raw query, then attach -USD suffix, then look up.
     auto resolve = [&](const std::string& s) -> std::optional<SymbolId> {

@@ -86,7 +86,7 @@ private:
     std::vector<Callback> callbacks_;
 
     // Pre-built CSV of registered symbol names to feed into Gemini's prompt.
-    std::string symbols_csv_;
+    std::string symbol_catalog_;
 };
 
 }  // namespace TradingSystem

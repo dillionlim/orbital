@@ -2,6 +2,11 @@ cmake_minimum_required(VERSION 3.15)
 
 project(TradingEngine VERSION 1.0.0 LANGUAGES CXX)
 
+# Single source of truth for the version reported by GET /status. Without this
+# the string was hardcoded in metrics.hpp and silently drifted from the number
+# above. Applies to every target, including tests and benchmarks.
+add_compile_definitions(BUBBLES_VERSION="${PROJECT_VERSION}")
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
@@ -216,4 +221,16 @@ add_engine_test_case(matching_engine_tests publishes_initial_snapshot_on_start)
 add_engine_test_case(matching_engine_tests rejects_market_order_when_book_is_empty)
 add_engine_test_case(matching_engine_tests emits_ack_fills_trade_print_and_book_delta_for_a_match)
 add_engine_test_case(matching_engine_tests publishes_book_delta_when_self_trade_prevention_empties_the_book)
+
+add_executable(news_symbol_tests EXCLUDE_FROM_ALL
+    tests/news_symbol_test.cpp
+    src/news_bot/gemini_client.cpp
+)
+configure_engine_test(news_symbol_tests)
+add_engine_test_case(news_symbol_tests resolves_a_name_from_the_descriptive_catalog)
+add_engine_test_case(news_symbol_tests resolves_case_insensitively)
+add_engine_test_case(news_symbol_tests is_not_confused_by_commas_or_hyphens_in_descriptions)
+add_engine_test_case(news_symbol_tests handles_a_line_with_no_description)
+add_engine_test_case(news_symbol_tests returns_empty_for_anything_unconfigured)
+add_engine_test_case(news_symbol_tests returns_empty_for_an_empty_catalog)
 

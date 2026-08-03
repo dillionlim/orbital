@@ -58,7 +58,7 @@ NewsAnalyzer::NewsAnalyzer(std::string backend_url,
         if (!s.desc.empty()) oss << " — " << s.desc;
         oss << "\n";
     }
-    symbols_csv_ = oss.str();
+    symbol_catalog_ = oss.str();
 }
 
 NewsAnalyzer::~NewsAnalyzer() { stop(); }
@@ -131,7 +131,7 @@ void NewsAnalyzer::loop() {
             // shot rather than being silently skipped forever.
             if (auth_backoff_) continue;
 
-            const GeminiResult res = gemini_->classify(it.headline, it.summary, symbols_csv_);
+            const GeminiResult res = gemini_->classify(it.headline, it.summary, symbol_catalog_);
 
             // AuthFailure: tolerate a small number in a row (occasional
             // 400 from Gemini isn't strictly an auth issue) before
@@ -204,7 +204,7 @@ void NewsAnalyzer::loop() {
             const auto& it = items[pick(rng)];
 
             const GeminiResult res =
-                gemini_->classify(it.headline, it.summary, symbols_csv_);
+                gemini_->classify(it.headline, it.summary, symbol_catalog_);
             if (res.error == GeminiError::AuthFailure) {
                 if (++consecutive_auth_failures_ >= kAuthFailuresBeforeBackoff) {
                     LOG_ERROR("news_analyzer: " << consecutive_auth_failures_
