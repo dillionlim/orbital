@@ -3,6 +3,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstring>
 #include <sstream>
@@ -137,6 +138,22 @@ bool ws_read_frame(int sockfd, WsFrame& out, size_t max_payload) {
         len = 0;
         for (int i = 0; i < 8; ++i) len = (len << 8) | ext[i];
     }
+    // RFC 6455 §5.5: a control frame (opcode with the high bit set — Close, Ping,
+    // Pong, and the reserved 0xB-0xF) carries at most 125 bytes and must never be
+    // fragmented. Both rules exist so a peer can always handle a control frame
+    // immediately, without buffering. Accepting the violations let a client park
+    // an unbounded ping payload in memory and have the server echo it straight
+    // back as a pong, itself an invalid frame.
+    if (is_control_opcode(out.opcode)) {
+        if (!out.fin) {
+            LOG_WARN("ws_read_frame: fragmented control frame, dropping connection");
+            return false;
+        }
+        if (len > kMaxControlPayload) {
+            LOG_WARN("ws_read_frame: control payload " << len << " exceeds 125");
+            return false;
+        }
+    }
     if (len > max_payload) {
         LOG_WARN("ws_read_frame: payload " << len << " exceeds limit " << max_payload);
         return false;
@@ -158,6 +175,13 @@ bool ws_read_frame(int sockfd, WsFrame& out, size_t max_payload) {
 }
 
 bool ws_write_frame(int sockfd, const WsFrame& frame) {
+    // Same rule on the way out: emitting an over-long or fragmented control frame
+    // would have the peer drop us for a protocol violation.
+    if (is_control_opcode(frame.opcode) &&
+        (!frame.fin || frame.payload.size() > kMaxControlPayload)) {
+        LOG_WARN("ws_write_frame: refusing to send an invalid control frame");
+        return false;
+    }
     std::vector<uint8_t> hdr;
     hdr.reserve(10);
     uint8_t b0 = (frame.fin ? 0x80 : 0x00) | (static_cast<uint8_t>(frame.opcode) & 0x0F);
@@ -195,6 +219,9 @@ bool ws_write_close(int sockfd, uint16_t code, std::string_view reason) {
     f.opcode = WsOpcode::Close;
     f.payload.push_back(static_cast<char>((code >> 8) & 0xFF));
     f.payload.push_back(static_cast<char>(code & 0xFF));
+    // The 2-byte status code eats into the 125-byte control budget. Trim the
+    // reason rather than drop the close: the status code is the part that matters.
+    reason = reason.substr(0, std::min(reason.size(), kMaxControlPayload - 2));
     f.payload.append(reason);
     return ws_write_frame(sockfd, f);
 }
@@ -202,7 +229,9 @@ bool ws_write_close(int sockfd, uint16_t code, std::string_view reason) {
 bool ws_write_pong(int sockfd, std::string_view payload) {
     WsFrame f;
     f.opcode = WsOpcode::Pong;
-    f.payload.assign(payload);
+    // A pong echoes the ping's application data, which ws_read_frame already
+    // bounds at 125 — belt and braces for any other caller.
+    f.payload.assign(payload.substr(0, std::min(payload.size(), kMaxControlPayload)));
     return ws_write_frame(sockfd, f);
 }
 
