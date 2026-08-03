@@ -3,6 +3,7 @@
 #include <sstream>
 
 #include "common/time.hpp"
+#include "server/json_escape.hpp"
 #include "server/protocol.hpp"
 
 namespace TradingSystem {
@@ -170,7 +171,7 @@ std::string RestRouter::handle_symbols() {
     for (std::size_t i = 0; i < syms.size(); ++i) {
         const auto& s = syms[i];
         if (i) oss << ",";
-        oss << "{\"name\":\"" << s.name << "\""
+        oss << "{\"name\":\"" << json_escape(s.name) << "\""
             << ",\"id\":" << s.id
             << ",\"mid\":" << s.mid;
         // Only emit caps when actually configured — sentinels would mean
@@ -198,15 +199,15 @@ std::string RestRouter::handle_index_prices() {
     for (const auto& [sym, e] : snap) {
         if (!first) oss << ",";
         first = false;
-        oss << "\"" << sym << "\":" << e.price;
+        oss << "\"" << json_escape(sym) << "\":" << e.price;
     }
     oss << "},\"meta\":{";
     first = true;
     for (const auto& [sym, e] : snap) {
         if (!first) oss << ",";
         first = false;
-        oss << "\"" << sym << "\":{\"ts\":" << e.ts
-            << ",\"source\":\"" << e.source << "\"}";
+        oss << "\"" << json_escape(sym) << "\":{\"ts\":" << e.ts
+            << ",\"source\":\"" << json_escape(e.source) << "\"}";
     }
     oss << "},\"ts\":" << now_ms() << "}";
     return http_response(200, oss.str(), "application/json");
@@ -241,7 +242,7 @@ std::string RestRouter::handle_trades(std::string_view path) {
         if (i) oss << ",";
         auto name = registry_->name_for(t.symbol);
         oss << "{\"trade_id\":" << t.trade_id
-            << ",\"symbol\":\"" << (name ? *name : std::string()) << "\""
+            << ",\"symbol\":\"" << json_escape(name ? *name : std::string()) << "\""
             << ",\"price\":" << t.price
             << ",\"quantity\":" << t.quantity
             << ",\"taker_side\":\"" << side_name(t.taker_side) << "\""
@@ -292,10 +293,10 @@ std::string RestRouter::handle_historical_trades(std::string_view path) {
         const auto& t = rows[i];
         if (i) oss << ",";
         oss << "{\"trade_id\":" << t.trade_id
-            << ",\"symbol\":\"" << t.symbol_name << "\""
+            << ",\"symbol\":\"" << json_escape(t.symbol_name) << "\""
             << ",\"price\":"    << t.price
             << ",\"quantity\":" << t.quantity
-            << ",\"taker_side\":\"" << t.taker_side << "\""
+            << ",\"taker_side\":\"" << json_escape(t.taker_side) << "\""
             << ",\"ts\":"       << t.ts << "}";
     }
     oss << "],\"count\":" << rows.size() << "}";
@@ -325,24 +326,12 @@ std::string RestRouter::handle_bots(std::string_view path, std::string_view requ
         if (!b.is_internal && b.user_id != caller) continue;
         if (!first) oss << ",";
         first = false;
-        // Escape strings minimally — our values are plaintext IDs/labels.
-        auto esc = [](const std::string& s) {
-            std::string r;
-            r.reserve(s.size());
-            for (char c : s) {
-                if (c == '"' || c == '\\') { r.push_back('\\'); r.push_back(c); }
-                else if (c == '\n') r += "\\n";
-                else if (static_cast<unsigned char>(c) < 0x20) continue;
-                else r.push_back(c);
-            }
-            return r;
-        };
-        oss << "{\"user_id\":\"" << esc(b.user_id) << "\""
-            << ",\"client_id\":\"" << esc(b.client_id) << "\""
-            << ",\"name\":\"" << esc(b.display_name) << "\""
-            << ",\"strategy_name\":\"" << esc(b.strategy_name) << "\""
+        oss << "{\"user_id\":\"" << json_escape(b.user_id) << "\""
+            << ",\"client_id\":\"" << json_escape(b.client_id) << "\""
+            << ",\"name\":\"" << json_escape(b.display_name) << "\""
+            << ",\"strategy_name\":\"" << json_escape(b.strategy_name) << "\""
             << ",\"is_internal\":" << (b.is_internal ? "true" : "false")
-            << ",\"status\":\"" << b.status << "\""
+            << ",\"status\":\"" << json_escape(b.status) << "\""
             << ",\"paused\":" << (b.paused ? "true" : "false")
             << ",\"orders_placed\":" << b.orders_placed
             << ",\"fills\":" << b.fills
@@ -377,20 +366,11 @@ std::string RestRouter::handle_leaderboard() {
     std::vector<std::pair<std::string, Agg>> rows(by_user.begin(), by_user.end());
     std::sort(rows.begin(), rows.end(),
               [](const auto& x, const auto& y) { return x.second.pnl > y.second.pnl; });
-    auto esc = [](const std::string& s) {
-        std::string r;
-        r.reserve(s.size());
-        for (char c : s) {
-            if (c == '"' || c == '\\') { r.push_back('\\'); r.push_back(c); }
-            else if (static_cast<unsigned char>(c) >= 0x20) r.push_back(c);
-        }
-        return r;
-    };
     std::ostringstream oss;
     oss << "{\"leaderboard\":[";
     for (std::size_t i = 0; i < rows.size(); ++i) {
         if (i) oss << ",";
-        oss << "{\"user_id\":\"" << esc(rows[i].first) << "\""
+        oss << "{\"user_id\":\"" << json_escape(rows[i].first) << "\""
             << ",\"total_pnl\":" << rows[i].second.pnl
             << ",\"fills\":" << rows[i].second.fills
             << ",\"volume\":" << rows[i].second.volume
@@ -412,7 +392,7 @@ std::string RestRouter::handle_auth(std::string_view request) {
                              "application/json");
     }
     std::ostringstream oss;
-    oss << "{\"authenticated\":true,\"user_id\":\"" << res.user_id << "\"}";
+    oss << "{\"authenticated\":true,\"user_id\":\"" << json_escape(res.user_id) << "\"}";
     return http_response(200, oss.str(), "application/json");
 }
 
@@ -426,7 +406,7 @@ std::string RestRouter::handle_me(std::string_view request) {
         return http_response(401, "{\"error\":\"invalid api key\"}", "application/json");
     }
     std::ostringstream oss;
-    oss << "{\"user_id\":\"" << res.user_id << "\"}";
+    oss << "{\"user_id\":\"" << json_escape(res.user_id) << "\"}";
     return http_response(200, oss.str(), "application/json");
 }
 
@@ -452,13 +432,13 @@ std::string RestRouter::handle_me_fills(std::string_view path, std::string_view 
 
     const auto fills = user_fills_->get(res.user_id, limit);
     std::ostringstream oss;
-    oss << "{\"user_id\":\"" << res.user_id << "\",\"fills\":[";
+    oss << "{\"user_id\":\"" << json_escape(res.user_id) << "\",\"fills\":[";
     for (std::size_t i = 0; i < fills.size(); ++i) {
         const auto& f = fills[i];
         if (i) oss << ",";
         auto name = registry_->name_for(f.symbol);
         oss << "{\"trade_id\":" << f.trade_id
-            << ",\"symbol\":\"" << (name ? *name : std::string()) << "\""
+            << ",\"symbol\":\"" << json_escape(name ? *name : std::string()) << "\""
             << ",\"price\":" << f.price
             << ",\"quantity\":" << f.quantity
             << ",\"side\":\"" << side_name(f.side) << "\""
@@ -496,7 +476,7 @@ std::string RestRouter::handle_bot_pause(std::string_view client_id,
                 sessions_.kick_by_client_id(auth_res.user_id, client_id);
             }
             std::ostringstream oss;
-            oss << "{\"ok\":true,\"client_id\":\"" << client_id
+            oss << "{\"ok\":true,\"client_id\":\"" << json_escape(client_id)
                 << "\",\"paused\":" << (pause ? "true" : "false") << "}";
             return http_response(200, oss.str(), "application/json");
         }
@@ -530,7 +510,7 @@ std::string RestRouter::handle_bot_remove(std::string_view client_id,
     switch (bots_->remove(client_id, auth_res.user_id)) {
         case BotTracker::PauseResult::Ok: {
             std::ostringstream oss;
-            oss << "{\"ok\":true,\"client_id\":\"" << client_id << "\",\"removed\":true}";
+            oss << "{\"ok\":true,\"client_id\":\"" << json_escape(client_id) << "\",\"removed\":true}";
             return http_response(200, oss.str(), "application/json");
         }
         case BotTracker::PauseResult::NotFound:
@@ -572,9 +552,9 @@ std::string RestRouter::handle_orderbook(std::string_view path, std::string_view
     oss << "{\"symbol\":\"";
     if (sym_id) {
         auto name = registry_->name_for(*sym_id);
-        oss << (name ? *name : sym_q);
+        oss << json_escape(name ? *name : sym_q);
     } else {
-        oss << sym_q;
+        oss << json_escape(sym_q);
     }
     oss << "\",\"timestamp\":\"" << now_ms() << "\"";
 

@@ -1,4 +1,5 @@
 #pragma once
+#include <cstddef>
 #include <cstdint>
 #include <map>
 #include <string>
@@ -20,6 +21,15 @@ struct WsFrame {
     WsOpcode opcode = WsOpcode::Text;
     std::string payload;
 };
+
+// RFC 6455 §5.5: control frames carry at most 125 bytes and are never fragmented.
+inline constexpr size_t kMaxControlPayload = 125;
+
+// Control opcodes are exactly those with the high bit of the 4-bit opcode set:
+// Close (0x8), Ping (0x9), Pong (0xA) and the reserved 0xB-0xF.
+inline constexpr bool is_control_opcode(WsOpcode op) {
+    return (static_cast<uint8_t>(op) & 0x08) != 0;
+}
 
 // A socket together with bytes that have already been pulled off it.
 //

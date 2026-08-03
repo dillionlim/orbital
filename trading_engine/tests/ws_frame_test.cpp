@@ -428,6 +428,70 @@ void reads_straight_from_the_socket_when_nothing_was_pre_read() {
     require_eq(f.payload, std::string("plain"), "payload");
 }
 
+// RFC 6455 §5.5: a control frame must have FIN set. A fragmented one is a
+// protocol violation, and the connection is dropped rather than reassembled.
+void rejects_fragmented_control_frames() {
+    const uint8_t key[4] = {0x11, 0x22, 0x33, 0x44};
+    for (const auto op : {WsOpcode::Close, WsOpcode::Ping, WsOpcode::Pong}) {
+        SocketPair sp;
+        write_bytes(sp.wr, masked_frame(false, op, "frag", key));
+        sp.close_wr();
+
+        WsFrame f;
+        require(!ws_read_frame(sp.rd, f), "a fragmented control frame must be refused");
+    }
+
+    // The reserved control opcodes are policed the same way.
+    SocketPair reserved;
+    write_bytes(reserved.wr, build_frame(false, 0xB, "frag", true, key, 4, 7));
+    reserved.close_wr();
+    WsFrame f;
+    require(!ws_read_frame(reserved.rd, f),
+            "a fragmented reserved control frame must be refused");
+}
+
+// The other half of §5.5: control payloads stop at 125 bytes. Without this a
+// client could park an arbitrarily large ping payload in memory and have the
+// server echo it straight back as an equally invalid pong.
+void rejects_oversized_control_frames() {
+    const uint8_t key[4] = {0x55, 0x66, 0x77, 0x88};
+
+    // 125 is the largest legal control payload.
+    {
+        SocketPair sp;
+        write_bytes(sp.wr, masked_frame(true, WsOpcode::Ping, std::string(125, 'p'), key));
+        sp.close_wr();
+        WsFrame f;
+        require(ws_read_frame(sp.rd, f), "125 bytes is still a legal control payload");
+        require_eq(f.payload, std::string(125, 'p'), "and its payload survives");
+    }
+
+    // 126 is not, and neither is anything above it.
+    for (const size_t n : {size_t{126}, size_t{200}, size_t{70000}}) {
+        SocketPair sp;
+        write_bytes(sp.wr, masked_frame(true, WsOpcode::Ping, std::string(n, 'p'), key));
+        sp.close_wr();
+        WsFrame f;
+        require(!ws_read_frame(sp.rd, f), "an over-long control payload must be refused");
+    }
+
+}
+
+// Data frames keep their existing behaviour — the 125-byte rule is control-only.
+void still_accepts_large_and_fragmented_data_frames() {
+    const uint8_t key[4] = {0x99, 0xAA, 0xBB, 0xCC};
+    SocketPair sp;
+    write_bytes(sp.wr, masked_frame(true, WsOpcode::Text, std::string(4096, 'd'), key));
+    write_bytes(sp.wr, masked_frame(false, WsOpcode::Text, "frag", key));
+    sp.close_wr();
+
+    WsFrame f;
+    require(ws_read_frame(sp.rd, f), "a 4KB text frame is fine");
+    require_eq(f.payload.size(), static_cast<size_t>(4096), "its payload is intact");
+    require(ws_read_frame(sp.rd, f), "a fragmented text frame is fine");
+    require(!f.fin, "and still reports fin=false");
+}
+
 // A normal request ends at \r\n\r\n; the reader does not block waiting for a
 // body that has not arrived, and the socket stays usable afterwards.
 void reads_headers_terminated_by_crlfcrlf() {
@@ -569,6 +633,10 @@ const std::vector<TestCase>& test_cases() {
          parses_control_frames_and_zero_length_payloads},
         {"reports_the_fin_bit_for_fragmented_frames", reports_the_fin_bit_for_fragmented_frames},
         {"passes_unknown_opcodes_through", passes_unknown_opcodes_through},
+        {"rejects_fragmented_control_frames", rejects_fragmented_control_frames},
+        {"rejects_oversized_control_frames", rejects_oversized_control_frames},
+        {"still_accepts_large_and_fragmented_data_frames",
+         still_accepts_large_and_fragmented_data_frames},
         {"reads_headers_terminated_by_crlfcrlf", reads_headers_terminated_by_crlfcrlf},
         {"keeps_body_bytes_that_arrive_in_the_same_read",
          keeps_body_bytes_that_arrive_in_the_same_read},

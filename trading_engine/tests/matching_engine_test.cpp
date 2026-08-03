@@ -126,6 +126,22 @@ bool has_fill_report(const std::vector<OutboundEvent>& events, OrderId id,
     return false;
 }
 
+bool has_cancel_ack(const std::vector<OutboundEvent>& events, OrderId id,
+                    Quantity remaining, const std::string& reason) {
+    for (const auto& event : events) {
+        if (const auto* report = std::get_if<ExecutionReport>(&event)) {
+            if (report->order_id == id &&
+                report->kind == ExecutionReport::Kind::CancelAck &&
+                report->remaining == remaining &&
+                report->status == OrderStatus::Cancelled &&
+                report->reason == reason) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 bool has_ask_delta(const std::vector<OutboundEvent>& events, Price price, Quantity qty) {
     for (const auto& event : events) {
         if (const auto* delta = std::get_if<BookDelta>(&event)) {
@@ -230,6 +246,72 @@ void publishes_book_delta_when_self_trade_prevention_empties_the_book() {
     engine.stop();
 }
 
+// A market order that only partly fills is finished the moment the sweep stops —
+// it never rests. Without an explicit terminal event the unfilled remainder stays
+// "working" forever in every subscriber that reserves against the Ack.
+void closes_out_the_unfilled_remainder_of_a_market_order() {
+    EventBus bus;
+    EventCollector events{bus};
+    std::atomic<uint64_t> trade_ids{1};
+    MatchingEngine engine{7, bus, trade_ids};
+    engine.start();
+
+    // Only 4 lots of liquidity on the offer.
+    require(engine.submit(InboundCmd{place(30, OrderSide::Sell, OrderType::Limit, 4, 105.0,
+                                           "maker", "maker_bot")}),
+            "maker order should enqueue");
+    require(events.wait_until([](const auto& snapshot) {
+        return has_ask_delta(snapshot, 105.0, 4);
+    }), "maker ask should publish to the book");
+
+    // Ask for 10; 4 fill, the other 6 have nowhere to go.
+    require(engine.submit(InboundCmd{place(31, OrderSide::Buy, OrderType::Market, 10, 0.0,
+                                           "taker", "taker_bot")}),
+            "market order should enqueue");
+
+    require(events.wait_until([](const auto& snapshot) {
+        return has_fill_report(snapshot, 31, 4, 6, OrderStatus::PartiallyFilled);
+    }), "the fillable part should execute");
+
+    require(events.wait_until([](const auto& snapshot) {
+        return has_cancel_ack(snapshot, 31, 6, "unfilled_market_remainder");
+    }), "the unfilled remainder should be cancelled explicitly");
+
+    engine.stop();
+}
+
+// The counterpart: a market order that fills completely is already terminal via
+// its last Fill, so it must NOT also emit a cancel for a zero remainder.
+void leaves_a_fully_filled_market_order_alone() {
+    EventBus bus;
+    EventCollector events{bus};
+    std::atomic<uint64_t> trade_ids{1};
+    MatchingEngine engine{7, bus, trade_ids};
+    engine.start();
+
+    require(engine.submit(InboundCmd{place(40, OrderSide::Sell, OrderType::Limit, 10, 105.0,
+                                           "maker", "maker_bot")}),
+            "maker order should enqueue");
+    require(events.wait_until([](const auto& snapshot) {
+        return has_ask_delta(snapshot, 105.0, 10);
+    }), "maker ask should publish to the book");
+
+    require(engine.submit(InboundCmd{place(41, OrderSide::Buy, OrderType::Market, 10, 0.0,
+                                           "taker", "taker_bot")}),
+            "market order should enqueue");
+    require(events.wait_until([](const auto& snapshot) {
+        return has_fill_report(snapshot, 41, 10, 0, OrderStatus::Filled);
+    }), "the market order should fill completely");
+
+    // Give the shard a beat to publish anything else it was going to.
+    require(!events.wait_until([](const auto& snapshot) {
+        return has_cancel_ack(snapshot, 41, 0, "unfilled_market_remainder");
+    }, std::chrono::milliseconds(200)),
+            "a fully filled market order should not emit a remainder cancel");
+
+    engine.stop();
+}
+
 struct TestCase {
     const char* name;
     void (*run)();
@@ -243,6 +325,10 @@ const std::vector<TestCase>& test_cases() {
          emits_ack_fills_trade_print_and_book_delta_for_a_match},
         {"publishes_book_delta_when_self_trade_prevention_empties_the_book",
          publishes_book_delta_when_self_trade_prevention_empties_the_book},
+        {"closes_out_the_unfilled_remainder_of_a_market_order",
+         closes_out_the_unfilled_remainder_of_a_market_order},
+        {"leaves_a_fully_filled_market_order_alone",
+         leaves_a_fully_filled_market_order_alone},
     };
     return cases;
 }

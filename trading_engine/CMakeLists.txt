@@ -110,6 +110,8 @@ add_engine_test_case(order_book_tests fills_same_price_level_in_arrival_order)
 add_engine_test_case(order_book_tests sweeps_multiple_price_levels_with_volume_weighted_average)
 add_engine_test_case(order_book_tests partially_fills_crossing_limit_and_rests_remainder)
 add_engine_test_case(order_book_tests cancels_partially_filled_resting_order_and_keeps_level_qty_honest)
+add_engine_test_case(order_book_tests reports_the_makers_own_fill_state_on_fills_and_cancels)
+add_engine_test_case(order_book_tests reports_maker_fill_state_on_self_trade_prevention)
 add_engine_test_case(order_book_tests rejects_cancel_of_unknown_order)
 add_engine_test_case(order_book_tests allows_internal_cancel_to_bypass_owner_check)
 add_engine_test_case(order_book_tests cancels_every_same_user_maker_at_a_level)
@@ -174,6 +176,9 @@ add_engine_test_case(ws_frame_tests returns_false_on_immediate_eof)
 add_engine_test_case(ws_frame_tests parses_control_frames_and_zero_length_payloads)
 add_engine_test_case(ws_frame_tests reports_the_fin_bit_for_fragmented_frames)
 add_engine_test_case(ws_frame_tests passes_unknown_opcodes_through)
+add_engine_test_case(ws_frame_tests rejects_fragmented_control_frames)
+add_engine_test_case(ws_frame_tests rejects_oversized_control_frames)
+add_engine_test_case(ws_frame_tests still_accepts_large_and_fragmented_data_frames)
 add_engine_test_case(ws_frame_tests reads_headers_terminated_by_crlfcrlf)
 add_engine_test_case(ws_frame_tests keeps_body_bytes_that_arrive_in_the_same_read)
 add_engine_test_case(ws_frame_tests replays_bytes_pre_read_with_the_headers)
@@ -224,6 +229,59 @@ add_engine_test_case(matching_engine_tests publishes_initial_snapshot_on_start)
 add_engine_test_case(matching_engine_tests rejects_market_order_when_book_is_empty)
 add_engine_test_case(matching_engine_tests emits_ack_fills_trade_print_and_book_delta_for_a_match)
 add_engine_test_case(matching_engine_tests publishes_book_delta_when_self_trade_prevention_empties_the_book)
+add_engine_test_case(matching_engine_tests closes_out_the_unfilled_remainder_of_a_market_order)
+add_engine_test_case(matching_engine_tests leaves_a_fully_filled_market_order_alone)
+
+add_executable(dispatcher_tests EXCLUDE_FROM_ALL
+    tests/dispatcher_test.cpp
+    src/server/dispatcher.cpp
+    src/server/session.cpp
+    src/server/protocol.cpp
+    src/server/snapshot_store.cpp
+    src/server/bot_tracker.cpp
+    src/server/position_tracker.cpp
+    src/server/ws_frame.cpp
+    src/engine/sequencer.cpp
+    src/engine/matching_engine.cpp
+    src/book/order_book.cpp
+    src/common/config.cpp
+)
+configure_engine_test(dispatcher_tests)
+add_engine_test_case(dispatcher_tests assigns_the_order_id_before_the_shard_can_report_it)
+add_engine_test_case(dispatcher_tests reaps_orders_that_fill_immediately)
+add_engine_test_case(dispatcher_tests prunes_filled_and_cancelled_orders_from_the_session)
+add_engine_test_case(dispatcher_tests keeps_tracking_orders_that_are_still_working)
+
+add_executable(sequencer_tests EXCLUDE_FROM_ALL
+    tests/sequencer_test.cpp
+    src/engine/sequencer.cpp
+    src/engine/matching_engine.cpp
+    src/book/order_book.cpp
+    src/common/config.cpp
+)
+configure_engine_test(sequencer_tests)
+add_engine_test_case(sequencer_tests drops_routing_entries_once_an_order_is_cancelled)
+add_engine_test_case(sequencer_tests drops_routing_entries_once_an_order_is_filled)
+add_engine_test_case(sequencer_tests keeps_no_routing_entry_for_a_rejected_place)
+add_engine_test_case(sequencer_tests rejects_an_unknown_cancel_without_deadlocking)
+
+add_executable(event_bus_tests EXCLUDE_FROM_ALL
+    tests/event_bus_test.cpp
+)
+configure_engine_test(event_bus_tests)
+add_engine_test_case(event_bus_tests unsubscribe_waits_for_an_in_flight_callback)
+add_engine_test_case(event_bus_tests never_invokes_a_callback_after_unsubscribe_returns)
+add_engine_test_case(event_bus_tests lets_publishes_overlap)
+add_engine_test_case(event_bus_tests survives_concurrent_publish_and_mutation)
+
+add_executable(json_escape_tests EXCLUDE_FROM_ALL
+    tests/json_escape_test.cpp
+)
+configure_engine_test(json_escape_tests)
+add_engine_test_case(json_escape_tests leaves_ordinary_values_alone)
+add_engine_test_case(json_escape_tests escapes_the_characters_that_break_out_of_a_string)
+add_engine_test_case(json_escape_tests keeps_hostile_query_and_path_values_inside_the_string)
+add_engine_test_case(json_escape_tests passes_utf8_through_unchanged)
 
 add_executable(news_symbol_tests EXCLUDE_FROM_ALL
     tests/news_symbol_test.cpp
