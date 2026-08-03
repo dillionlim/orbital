@@ -11,7 +11,7 @@ independent jobs so a failure in one still reports results for the others:
 |---|---|
 | `frontend` | `npm ci`, `tsc --noEmit`, `npm run lint`, `npm test` (vitest) |
 | `backend` | `npm ci`, `npx prisma generate`, `tsc --noEmit`, `npm test` (jest), `npm run test:e2e` |
-| `trading-engine` | `cmake` configure, build `order_book_tests` + `matching_engine_tests` + `mpsc_ring_tests` + `session_tests` + `protocol_tests` + `ws_frame_tests` + `auth_tests`, `ctest` |
+| `trading-engine` | `cmake` configure, build `order_book_tests` + `matching_engine_tests` + `mpsc_ring_tests` + `session_tests` + `protocol_tests` + `ws_frame_tests` + `auth_tests` + `news_symbol_tests`, `ctest` |
 
 ## Running Tests
 
@@ -52,7 +52,7 @@ cd trading_engine
 cmake -B ./build/tests -S . -DCMAKE_BUILD_TYPE=Debug
 
 # Build the CTest binaries
-cmake --build ./build/tests --target order_book_tests matching_engine_tests mpsc_ring_tests session_tests protocol_tests ws_frame_tests auth_tests -- -j"$(nproc)"
+cmake --build ./build/tests --target order_book_tests matching_engine_tests mpsc_ring_tests session_tests protocol_tests ws_frame_tests auth_tests news_symbol_tests -- -j"$(nproc)"
 
 # Run all registered CTest cases
 ctest --test-dir ./build/tests --output-on-failure
@@ -220,12 +220,6 @@ The snapshot/delta merge used to live inside `OrderBook.tsx` as `useRef` state m
 
 ### Unit Tests
 
-#### `backend/src/app.controller.spec.ts`
-
-| Test | Type | Purpose | What it does |
-|---|---|---|---|
-| `should return "Hello World!"` | Unit | Smoke-test the root controller/service delegation. | Builds a small Nest testing module and checks `getHello()` returns the service greeting. |
-
 #### `backend/src/auth/supabase-auth.guard.spec.ts`
 
 | Test | Type | Purpose | What it does |
@@ -279,13 +273,6 @@ The snapshot/delta merge used to live inside `OrderBook.tsx` as `useRef` state m
 | `validates the key when no shared secret is configured` | Unit | Keep the endpoint dev-friendly when `ENGINE_SHARED_SECRET` is unset. | Unsets the env var and checks the key is forwarded to the validator. |
 | `rejects a mismatched engine secret before touching the database` | Unit | Stop a stranger mounting a DB-DoS amplifier against `findUnique`. | Sets the secret, sends the wrong one, and checks the `engine secret missing or invalid` rejection with no service call. |
 | `accepts the request when the engine secret matches` | Unit | Let the engine through the gate with the right secret. | Sets and sends the matching secret and checks the service is called with the key. |
-
-#### `backend/src/trading/trading.controller.spec.ts`
-
-| Test | Type | Purpose | What it does |
-|---|---|---|---|
-| `returns market data from the trading service` | Unit | Ensure market reads pass through to the service. | Injects a mocked `TradingEngineService`, returns a market object, and checks the controller returns the same object. |
-| `uses the authenticated user id when loading a portfolio` | Unit | Ensure portfolio reads are scoped to the request identity. | Passes a request with `auth.userId` and checks the service is called with that user id. |
 
 #### `backend/src/users/users.service.spec.ts`
 
@@ -387,19 +374,6 @@ that field with a fake reader over an in-memory row array rather than crossing t
 | `floors a fractional limit to an integer` | Unit | Keep Prisma's `take` an integer. | Calls with `10.9` and checks the service sees 10. |
 
 ### HTTP Integration Tests
-
-#### `backend/test/app.e2e-spec.ts`
-
-| Test | Type | Purpose | What it does |
-|---|---|---|---|
-| `/ (GET)` | Integration | Smoke-test the root HTTP route. | Boots a minimal Nest app and uses Supertest to expect `200` and `Hello World!`. |
-
-#### `backend/test/trading.e2e-spec.ts`
-
-| Test | Type | Purpose | What it does |
-|---|---|---|---|
-| `serves market data over HTTP` | Integration | Exercise the authenticated market endpoint. | Boots a Nest app with a mocked guard/service and checks `GET /trading/market`. |
-| `passes the authenticated user to the portfolio service call` | Integration | Ensure HTTP identity reaches the portfolio service. | Mock guard injects `auth.userId`; Supertest hits `/trading/portfolio` and verifies service args. |
 
 #### `backend/test/api-key.e2e-spec.ts`
 
@@ -533,3 +507,20 @@ Covers `extractApiKeyFromHttp` (pulling a credential out of a raw HTTP request) 
 | `revokes_keys_with_remove_key` | Unit | `removeKey` revokes immediately and idempotently, and the key can be re-added. | Revokes a valid key and checks it and its user id are gone, that removing twice or an absent key is harmless, and that it can be re-seeded. |
 | `serves_cached_positive_and_honours_revocation` | Unit | A seeded entry outlives the configured TTL; only revocation ends it. | Serves the cached positive 100 times with TTL 0, changes the TTL, and checks revocation still beats a long TTL. |
 | `survives_concurrent_validate_and_mutation` | Unit | Readers and mutators racing on the same keys must never crash, tear, or race. | Runs six readers against a mutator adding/removing keys for 2000 iterations (under ThreadSanitizer) and checks no user id tears and no unseeded key validates. |
+
+### `trading_engine/tests/news_symbol_test.cpp`
+
+Covers `resolve_symbol()` against the catalog format `NewsAnalyzer` actually emits.
+Regression origin: the catalog is newline-separated `NAME — description`, but the
+parser split it on `,`. Configured descriptions contain no commas, so every Gemini
+news signal resolved to `""` and was silently dropped — news bots connected and
+logged normally but never traded.
+
+| Test | Type | Purpose | What it does |
+|---|---|---|---|
+| `resolves_a_name_from_the_descriptive_catalog` | Unit | The common path: a name carrying a description must resolve. | Resolves the first and a later entry of a multi-line catalog and checks each returns its bare wire name. |
+| `resolves_case_insensitively` | Unit | The model may answer in any case. | Resolves lower-case and mixed-case answers and checks both return the configured spelling. |
+| `is_not_confused_by_commas_or_hyphens_in_descriptions` | Unit | Pin the exact characters the old comma-splitting parser tripped over. | Resolves an entry whose description contains both a comma and a hyphen. |
+| `handles_a_line_with_no_description` | Unit | A symbol configured without a description is a bare name. | Resolves a catalog line carrying no separator. |
+| `returns_empty_for_anything_unconfigured` | Unit | Unknown instruments are dropped, and description text must not be matchable. | Feeds an unconfigured symbol, an empty answer, and both a partial and a full description, and checks each yields `""`. |
+| `returns_empty_for_an_empty_catalog` | Unit | No configured symbols means nothing can resolve. | Resolves against an empty catalog and checks the result is `""`. |

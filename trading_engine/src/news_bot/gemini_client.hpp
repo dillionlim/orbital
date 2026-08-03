@@ -7,7 +7,7 @@ namespace TradingSystem {
 enum class NewsDirection { Buy, Sell, Hold };
 
 struct NewsAnalysis {
-    // The wire-name symbol the model picked from `symbols_csv`, or "" if it
+    // The wire-name symbol the model picked from `symbol_catalog`, or "" if it
     // returned "NONE" / something we didn't recognise.
     std::string symbol_name;
     NewsDirection direction = NewsDirection::Hold;
@@ -51,12 +51,19 @@ public:
     [[nodiscard]] GeminiResult classify(
         const std::string& headline,
         const std::string& summary,
-        const std::string& symbols_csv) const;
+        const std::string& symbol_catalog) const;
 
 private:
     std::string api_key_;
     std::string model_;
     bool key_ok_ = false;
 };
+
+// Map the model's chosen instrument back to a configured wire name, against the
+// newline-separated "NAME — description" catalog NewsAnalyzer builds. Returns ""
+// when nothing matches, which the caller treats as "drop this signal".
+// Exposed for testing — see tests/news_symbol_test.cpp.
+[[nodiscard]] std::string resolve_symbol(const std::string& chosen,
+                                         const std::string& symbol_catalog);
 
 }  // namespace TradingSystem

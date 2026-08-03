@@ -34,7 +34,7 @@ export default function Dashboard() {
   return (
     <div className="min-h-screen bg-slate-900 text-slate-200 font-sans selection:bg-blue-500/30">
       <Header />
-      
+
       <main className="p-4 md:p-6 grid grid-cols-1 md:grid-cols-12 gap-6 max-w-[1920px] mx-auto">
         {/* Top Row: Order Book & Bots & News Feed */}
         <div className="col-span-1 md:col-span-5 lg:col-span-5 space-y-6" data-tour="orderbook">

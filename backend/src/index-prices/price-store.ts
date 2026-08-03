@@ -48,7 +48,7 @@ export interface PriceStore {
 }
 
 export function createPriceStore(logger?: Logger, db?: SqlClient): PriceStore {
-  // Prefer Postgres (Supabase) via the app's Prisma connection. 
+  // Prefer Postgres (Supabase) via the app's Prisma connection.
   // Falls back to in-memory.
   if (db) {
     logger?.log('index-prices: using Postgres store (via Prisma)');

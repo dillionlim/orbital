@@ -13,8 +13,6 @@ export const ETF_SYMBOLS = ['SPY', 'EWJ', 'EWH', 'EWY', 'FEZ'] as const;
 // Everything tradeable — used by the order book, trade ticker, and backtester.
 export const SYMBOLS: string[] = [...FUTURES_SYMBOLS, ...ETF_SYMBOLS];
 
-export const DEFAULT_SYMBOL = 'ES';
-
 // --- Display-only cash indices (NOT tradeable; shown in the Indices panel) ---
 export const INDEX_SYMBOLS = ['NIKKEI', 'HSI', 'KOSPI', 'STOXX50'] as const;
 

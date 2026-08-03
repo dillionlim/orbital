@@ -16,7 +16,7 @@ namespace TradingSystem {
 inline constexpr Quantity kNoPositionLimit = std::numeric_limits<Quantity>::max();
 
 struct SymbolConfig {
-    std::string name;     // wire name, e.g. "BTC-USD"
+    std::string name;     // wire name, e.g. "ES"
     SymbolId id;          // internal id
     Price mid;             // initial mid for the market maker
     std::string desc;      // human description (e.g. "S&P 500 E-mini future") —

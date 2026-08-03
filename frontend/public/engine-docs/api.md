@@ -1,222 +1,198 @@
-# Bubbles Trading Engine API
+# Bubbles Trading Engine — client guide
 
-## Overview
+How to connect a bot to a Bubbles engine. The engine speaks JSON over a single
+WebSocket for trading and streaming, plus a small REST surface for snapshots and
+account queries (see [`openapi.yaml`](./openapi.yaml)).
 
-Bubbles provides a comprehensive API for building automated trading bots. The API is designed to be:
-- **Easy to use**: Simple, intuitive interfaces
-- **Fast**: WebSocket-based for real-time data
-- **Reliable**: Built for production trading systems
+There is no client SDK to install — the protocol is small enough to drive from any
+language with a WebSocket library. `bots/lib.py` in the repository is the reference
+implementation and the strategies beside it (`market_maker.py`, `momentum.py`,
+`mean_reverter.py`, `taker.py`) are working examples.
 
-## Quick Start
+## Endpoints
 
-```cpp
-#include <public_api.hpp>
+A Bubbles engine serves REST and WebSocket from **one port**, default `9090`:
 
-using namespace Bubbles::API;
+| Purpose   | URL                       |
+|-----------|---------------------------|
+| WebSocket | `ws://<host>:9090/`       |
+| REST      | `http://<host>:9090`      |
 
-int main() {
-    // Connect to the trading engine
-    auto client = TradingClient::connect("ws://localhost:8080");
-    
-    // Place a buy order
-    OrderRequest order{
-        .symbol = 1,              // BTC/USDT
-        .side = OrderSide::Buy,
-        .type = OrderType::Limit,
-        .quantity = 100,
-        .limitPrice = 50000.0
-    };
-    
-    auto response = client->placeOrder(order);
-    std::cout << "Order placed: " << response.orderId << std::endl;
-    
-    return 0;
+The WebSocket path is the **root** (`/`).
+
+## Authentication
+
+Send your API key as a header on the WebSocket upgrade request, and on any REST call
+that requires auth. Either header works:
+
+```
+Api-Key: sk_live_…
+Authorization: Bearer sk_live_…
+```
+
+Query-string auth (`?api_key=…`) is **not** accepted. It was removed deliberately:
+URLs end up in proxy and browser-history logs, and a query-param POST is a "simple"
+CORS request that skips preflight.
+
+The engine validates the key against the configured backend (`backend_url` in
+`server.json`). A good key completes the upgrade with HTTP 101; a bad one is rejected
+with HTTP 401.
+
+## Symbols
+
+Instruments are deployment-specific — read `GET /symbols` rather than hardcoding
+them. A default install trades index futures and the ETFs tracking the same indices:
+
+```
+ES, NKD, NQ, YM, RTY          index futures
+SPY, EWJ, EWH, EWY, FEZ       tracking ETFs
+```
+
+Symbol names on the wire are the `name` field from `/symbols` (e.g. `"ES"`).
+
+## Connecting
+
+Send `hello` first; the server replies `welcome`.
+
+```jsonc
+// → server
+{ "t": "hello", "client_id": "my-bot-1" }
+
+// ← server
+{ "t": "welcome", "user_id": "user_abc123", "server_time": 1777800000000 }
+```
+
+`client_id` is your own label for this bot. It's what appears on the dashboard and
+what `/bots/<client_id>/pause` addresses, so keep it stable and unique per strategy.
+
+## Client → server messages
+
+| `t`             | Fields                                                                        |
+|-----------------|-------------------------------------------------------------------------------|
+| `hello`         | `client_id`                                                                   |
+| `place_order`   | `client_order_id`, `symbol`, `side`, `type`, `quantity`, `limit_price` (Limit) |
+| `cancel_order`  | `order_id`                                                                    |
+| `subscribe`     | `channel`, `symbol`, optional `depth` (book only, default 10)                 |
+| `unsubscribe`   | `channel`, `symbol`                                                           |
+| `ping`          | —                                                                             |
+
+`side` is `Buy` or `Sell`. `type` is `Limit` or `Market` — parsing is case-insensitive
+(`"limit"`, `"LIMIT"` also work). **Stop and stop-limit orders are not supported.**
+
+### Placing orders
+
+```jsonc
+// Limit
+{
+  "t": "place_order",
+  "client_order_id": "c-1",
+  "symbol": "ES",
+  "side": "Buy",
+  "type": "Limit",
+  "quantity": 10,
+  "limit_price": 7399.75
+}
+
+// Market — omit limit_price
+{
+  "t": "place_order",
+  "client_order_id": "c-2",
+  "symbol": "ES",
+  "side": "Sell",
+  "type": "Market",
+  "quantity": 5
 }
 ```
 
-## Connection Endpoints
+`client_order_id` is echoed back on the acknowledgement, which is how you correlate a
+fill with the order you sent. A market order against an empty book is rejected.
 
-| Environment | WebSocket | REST API |
-|------------|-----------|----------|
-| Production | `ws://localhost:8080` | `http://localhost:8080` |
-| Market Data | `ws://localhost:8081` | `http://localhost:8081` |
+### Cancelling
 
-## WebSocket API
-
-### TradingClient
-
-The main client for authenticated trading operations.
-
-```cpp
-auto client = TradingClient::connect("ws://localhost:8080");
+```jsonc
+{ "t": "cancel_order", "order_id": 4211 }
 ```
 
-#### Methods
+`order_id` is the engine-assigned id from the execution report — not your
+`client_order_id`. You may only cancel orders placed by your own `user_id`.
 
-| Method | Description |
-|--------|-------------|
-| `placeOrder(request)` | Submit a new order |
-| `cancelOrder(orderId)` | Cancel an existing order |
-| `getOrder(orderId)` | Get order status |
-| `getOpenOrders(symbol)` | Get all open orders |
-| `getBalances()` | Get account balances |
-| `getPositions()` | Get open positions |
-| `subscribeMarketData(symbols, callback)` | Subscribe to real-time price feeds |
-| `setOrderCallback(callback)` | Receive order updates |
-| `getServerTime()` | Get server time |
+### Subscribing
 
-#### Order Types
-
-```cpp
-enum class OrderSide {
-    Buy,   // Purchase order
-    Sell   // Sell order
-};
-
-enum class OrderType {
-    Market,     // Execute immediately at best available price
-    Limit,      // Execute at specified price or better
-    Stop,       // Trigger order when price is reached
-    StopLimit   // Limit order triggered by stop price
-};
+```jsonc
+{ "t": "subscribe", "channel": "book",   "symbol": "ES", "depth": 10 }
+{ "t": "subscribe", "channel": "trades", "symbol": "ES" }
 ```
 
-#### Example: Place Order
+## Server → client messages
 
-```cpp
-OrderRequest order;
-order.symbol = 1;              // Symbol ID for BTC/USDT
-order.side = OrderSide::Buy;
-order.type = OrderType::Limit;
-order.quantity = 100;
-order.limitPrice = 50000.0;    // Buy at 50000 or lower
+| `t`             | Meaning                                                             |
+|-----------------|---------------------------------------------------------------------|
+| `welcome`       | Handshake accepted; carries your `user_id` and server time          |
+| `execution_report` | Order accepted, filled, cancelled, or rejected                   |
+| `trade`         | A trade printed on a subscribed symbol                              |
+| `book`          | Full order book snapshot (sent once at subscribe time)              |
+| `book_delta`    | Incremental book update                                             |
+| `pong`          | Reply to `ping`                                                     |
+| `error`         | Carries a `code` and human-readable `message`                       |
 
-auto response = client->placeOrder(order);
-std::cout << "Order ID: " << response.orderId << std::endl;
-std::cout << "Status: " << response.status << std::endl;
+### Keeping a book in sync
+
+The engine sends **one** `book` snapshot when you subscribe, then only `book_delta`
+patches. You must apply the deltas — if you keep only the snapshot, your view of the
+top of book freezes at subscribe time and your quotes will be priced off stale data.
+`bots/lib.py` maintains a full per-side price→quantity map this way.
+
+## REST
+
+Full reference in [`openapi.yaml`](./openapi.yaml). Common calls:
+
+```bash
+# Liveness
+curl -s http://localhost:9090/health
+# {"status":"healthy"}
+
+# What can I trade here?
+curl -s http://localhost:9090/symbols | jq .
+
+# Book snapshot — `symbol` is required
+curl -s 'http://localhost:9090/orderbook?symbol=ES' | jq .
+
+# Recent trades (limit defaults to 50, caps at 500)
+curl -s 'http://localhost:9090/trades?symbol=ES&limit=100' | jq .
+
+# Deep history from SQLite (caps at 50000)
+curl -s 'http://localhost:9090/trades/historical?symbol=ES&from=1777800000000' | jq .
+
+# Who am I?
+curl -s -H 'Api-Key: sk_live_…' http://localhost:9090/me | jq .
 ```
 
-#### Example: Subscribe to Market Data
+`/health`, `/status`, `/metrics`, `/symbols`, `/orderbook`, `/trades`, `/bots` and
+`/leaderboard` are anonymous-friendly. `/me`, `/me/fills`, `/auth` and the
+`/bots/<client_id>` mutations require a key. Passing an invalid key to an
+anonymous-friendly endpoint is still a 401.
 
-```cpp
-client->subscribeMarketData({1, 2, 3}, [](const MarketTick& tick) {
-    std::cout << "Symbol " << tick.symbol << ": ";
-    std::cout << tick.bid << " / " << tick.ask << std::endl;
-});
+## Errors
+
+Errors arrive as a frame rather than an exception:
+
+```jsonc
+{ "t": "error", "code": "BOT_PAUSED", "message": "bot is paused" }
 ```
 
-### MarketDataClient
+A rejected order arrives as an `execution_report` with status `Rejected`, not as an
+`error` frame. Rejections you should expect: unknown symbol, market order against an
+empty book, non-positive quantity or price, a position cap breach, and cancelling an
+order you don't own.
 
-Read-only client for market data. No authentication required.
+Note that when a bot is paused from the dashboard the engine writes a `BOT_PAUSED`
+error, then closes the socket — treat a clean close as a normal shutdown, not a fault.
 
-```cpp
-auto market = MarketDataClient::connect("ws://localhost:8081");
-```
+## Notes
 
-#### Methods
-
-| Method | Description |
-|--------|-------------|
-| `getTicker(symbol)` | Get current price |
-| `getOrderBook(symbol, depth)` | Get order book |
-| `getCandles(symbol, interval, start, end)` | Get historical candles |
-| `subscribeTicker(symbols, callback)` | Real-time price updates |
-| `subscribeOrderBook(symbols, depth, callback)` | Real-time order book |
-
-#### Candle Intervals
-
-| Interval | Description |
-|----------|-------------|
-| 60 | 1 minute |
-| 300 | 5 minutes |
-| 900 | 15 minutes |
-| 3600 | 1 hour |
-| 86400 | 1 day |
-
-## REST API
-
-### RESTClient
-
-```cpp
-auto rest = RESTClient::create("http://localhost:8080");
-```
-
-#### Methods
-
-| Method | Description |
-|--------|-------------|
-| `getExchangeInfo()` | Get exchange metadata |
-| `getTradingPairs()` | List all trading pairs |
-| `getTrades(symbol, limit)` | Get recent trades |
-| `getAggTrades(symbol, start, end)` | Get aggregated trades |
-| `get24hrTicker(symbol)` | Get 24hr statistics |
-
-## Data Types
-
-### Price
-```cpp
-using Price = double;
-```
-
-### Quantity
-```cpp
-using Quantity = uint64_t;
-```
-
-### OrderId
-```cpp
-using OrderId = uint64_t;
-```
-
-### SymbolId
-```cpp
-using SymbolId = uint64_t;
-```
-
-### Timestamp
-```cpp
-using Timestamp = uint64_t;  // Unix timestamp in milliseconds
-```
-
-## Error Handling
-
-All methods throw exceptions on critical errors. Check `response.message` for error details:
-
-```cpp
-try {
-    auto response = client->placeOrder(order);
-    if (response.status == OrderStatus::Rejected) {
-        std::cerr << "Order rejected: " << response.message << std::endl;
-    }
-} catch (const std::exception& e) {
-    std::cerr << "Connection error: " << e.what() << std::endl;
-}
-```
-
-## Rate Limits
-
-| Endpoint | Limit |
-|----------|-------|
-| Orders | 100 per second |
-| Market Data | 1000 per second |
-| REST API | 60 per minute |
-
-## Best Practices
-
-1. **Use WebSocket for real-time data** - More efficient than polling
-2. **Handle reconnections** - Set connection callback to detect disconnects
-3. **Use client order IDs** - Track orders across reconnections
-4. **Implement idempotency** - Use unique clientOrderId for each order
-5. **Subscribe to order updates** - Don't poll for order status
-
-## Security
-
-- Use API keys for authenticated endpoints
-- Keep credentials secure
-- Implement IP whitelisting
-- Use TLS/SSL connections
-
-## Support
-
-- GitHub Issues: Report bugs and feature requests
-- Documentation: See `/docs` for full reference
+- There is no rate limiter in the engine. It is a practice venue, not a public
+  exchange; be considerate on a shared server.
+- Connections are plain `ws://` / `http://`. The engine is designed to run on your own
+  machine or a private server, not exposed to the internet.
+- Reconnects are your responsibility. Re-send `hello` and re-`subscribe`; resting
+  orders survive a disconnect, so reconcile with `/me/fills` before assuming state.

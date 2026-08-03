@@ -51,13 +51,12 @@ export const Header: React.FC = () => {
       broadcastCurrentServer(storedCurrent);
     });
   }, []);
-  
-  // Add Server Modal State
+
   const [isAddServerModalOpen, setIsAddServerModalOpen] = useState(false);
 
   const checkServerHealth = async (ip: string): Promise<boolean> => {
     if (!ip.trim()) return false;
-    
+
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 3000);
@@ -66,7 +65,7 @@ export const Header: React.FC = () => {
         method: 'GET',
         signal: controller.signal
       });
-      
+
       clearTimeout(timeoutId);
       return response.ok && (await response.json()).status === 'healthy';
     } catch {
@@ -212,7 +211,7 @@ export const Header: React.FC = () => {
         <div className="flex-1 flex justify-center px-4">
           <div className="flex items-center gap-2">
              <span className="text-slate-400 text-xs font-mono hidden sm:inline">SERVER:</span>
-             
+
              <div className="flex items-center bg-slate-800 rounded-md border border-slate-700 px-3 py-1.5 w-64 md:w-80" data-tour="server">
                 <CustomDropdown
                   options={servers}
@@ -221,7 +220,7 @@ export const Header: React.FC = () => {
                   onRemove={handleRemoveServer}
                   protectedOption={DEFAULT_SERVER}
                 />
-                
+
                 <button
                   type="button"
                   onClick={() => setIsAddServerModalOpen(true)}
@@ -333,7 +332,7 @@ export const Header: React.FC = () => {
       </header>
 
       {isAddServerModalOpen && (
-        <AddServerModal 
+        <AddServerModal
           onClose={() => setIsAddServerModalOpen(false)}
           onSave={handleSaveServer}
           servers={servers}

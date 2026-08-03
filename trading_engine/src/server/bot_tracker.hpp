@@ -115,7 +115,7 @@ private:
         uint64_t volume = 0;
         double cash_realized = 0.0;
         std::unordered_map<SymbolId, int64_t> positions;
-        std::deque<Fill> recent_fills;  // pruned to last hour
+        std::deque<Fill> recent_fills;  // pruned to kFillRetentionMs (24h)
     };
 
     void on_event(const OutboundEvent& ev);

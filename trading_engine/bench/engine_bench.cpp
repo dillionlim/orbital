@@ -84,7 +84,7 @@ static void bench_cancel(uint64_t N) {
            ns_per(dt, N), mops(N, dt), (unsigned long long)ok, (unsigned long long)N);
 }
 
-// ---- 3. best_bid / best_ask read (O(log N)) ------------------------------
+// ---- 3. best_bid / best_ask read (O(1)) ----------------------------------
 static void bench_topofbook(uint64_t N) {
     OrderBook book(1);
     for (int i = 0; i < 200; ++i) {

@@ -26,7 +26,6 @@ struct Order {
     Quantity quantity = 0;
     Quantity filled = 0;
     Price limit_price = 0.0;        // 0 for Market
-    Price level_price = 0.0;        // price level it currently rests on (when resting)
     std::string user_id;
     std::string client_id;          // self-supplied bot label (from WS hello)
     std::string client_order_id;
