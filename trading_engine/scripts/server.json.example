@@ -34,10 +34,11 @@
     "requote_drift_bps": 0
   },
   "_market_maker_help": [
-    "requote_drift_bps: when an external trade prints this many bps from the",
-    "MM's quote anchor, both sides are cancelled and reposted at the new price.",
-    "0 = use the default of max(spread_bps/2, 5). Lower = MM follows fast moves",
-    "more aggressively (and emits more cancels); higher = stale quotes linger."
+    "requote_drift_bps: once the anchor has moved this many bps from the one the",
+    "resting ladder was built on, both sides are cancelled and reposted at the",
+    "new price. 0 = one tick (the grid the ladder is priced on, and the smallest",
+    "move that can reprice it). Lower = MM follows fast moves more aggressively",
+    "(and emits more cancels); higher = stale quotes linger."
   ],
   "news": {
     "poll_seconds": 15,

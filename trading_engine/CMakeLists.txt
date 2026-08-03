@@ -283,6 +283,15 @@ add_engine_test_case(json_escape_tests escapes_the_characters_that_break_out_of_
 add_engine_test_case(json_escape_tests keeps_hostile_query_and_path_values_inside_the_string)
 add_engine_test_case(json_escape_tests passes_utf8_through_unchanged)
 
+add_executable(quote_math_tests EXCLUDE_FROM_ALL
+    tests/quote_math_test.cpp
+)
+configure_engine_test(quote_math_tests)
+add_engine_test_case(quote_math_tests derives_a_tick_from_the_anchor_magnitude)
+add_engine_test_case(quote_math_tests treats_zero_drift_bps_as_one_tick)
+add_engine_test_case(quote_math_tests honours_a_configured_drift_threshold)
+add_engine_test_case(quote_math_tests repaints_unconditionally_without_a_usable_anchor)
+
 add_executable(news_symbol_tests EXCLUDE_FROM_ALL
     tests/news_symbol_test.cpp
     src/news_bot/gemini_client.cpp
