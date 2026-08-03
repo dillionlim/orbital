@@ -43,16 +43,26 @@ public:
 
     [[nodiscard]] OrderId peek_next_order_id() const { return next_order_id_.load(); }
 
+    // Number of orders currently routable by cancel. Test seam: the routing map
+    // is private and its size is otherwise unobservable.
+    [[nodiscard]] size_t routable_orders() const;
+
 private:
+    // Drops an order from the routing map once it can no longer be cancelled.
+    void on_event(const OutboundEvent& ev);
+
     EventBus& bus_;
+    EventBus::SubscriberId sub_id_ = 0;
     std::shared_ptr<SymbolRegistry> registry_;
     std::atomic<OrderId> next_order_id_{1};
 
     // Shards by SymbolId.
     std::unordered_map<SymbolId, std::unique_ptr<MatchingEngine>> shards_;
 
-    // OrderId → SymbolId for cancel routing.
-    std::mutex order_index_mu_;
+    // OrderId → SymbolId for cancel routing. Entries live exactly as long as the
+    // order can still be cancelled: added on submit_place, dropped when the order
+    // reaches a terminal state (see on_event).
+    mutable std::mutex order_index_mu_;
     std::unordered_map<OrderId, SymbolId> order_to_symbol_;
 };
 
