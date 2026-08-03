@@ -153,7 +153,6 @@ ApplyResult OrderBook::apply(const OrderInput& in) {
     o->quantity = in.quantity;
     o->filled = taker_filled;
     o->limit_price = in.limit_price;
-    o->level_price = in.limit_price;
     o->user_id.assign(in.user_id);
     o->client_id.assign(in.client_id);
     o->client_order_id.assign(in.client_order_id);

@@ -301,11 +301,11 @@ make run                # builds Release, then starts the engine on :9090`}</Cod
             <CodeBlock lang="bash">{`curl http://localhost:9090/health
 # {"status":"healthy"}
 
-curl 'http://localhost:9090/orderbook?symbol=BTC' | jq .
-# { "symbol":"BTC-USD", "timestamp":"...", "bids":[...], "asks":[...] }
+curl 'http://localhost:9090/orderbook?symbol=ES' | jq .
+# { "symbol":"ES", "timestamp":"...", "bids":[...], "asks":[...] }
 
 curl http://localhost:9090/symbols | jq .
-# { "symbols":[ {"name":"BTC-USD","id":1,"mid":50000}, ... ] }`}</CodeBlock>
+# { "symbols":[ {"name":"ES","id":1,"mid":7400}, ... ] }`}</CodeBlock>
 
             <h3 className="text-lg font-semibold text-white mt-5 mb-2">2. Connect a bot via WebSocket</h3>
             <CodeBlock lang="python">{`import asyncio, json, websockets
@@ -318,15 +318,15 @@ async def main():
         extra_headers={"Api-Key": API_KEY},
     ) as ws:
         await ws.send(json.dumps({"t": "hello", "client_id": "demo-bot"}))
-        await ws.send(json.dumps({"t": "subscribe", "channel": "book", "symbol": "BTC-USD"}))
+        await ws.send(json.dumps({"t": "subscribe", "channel": "book", "symbol": "ES"}))
         await ws.send(json.dumps({
             "t": "place_order",
             "client_order_id": "x1",
-            "symbol": "BTC-USD",
+            "symbol": "ES",
             "side": "Buy",
             "type": "Limit",
             "quantity": 5,
-            "limit_price": 50100.0,
+            "limit_price": 7400.25,
         }))
         async for msg in ws:
             print(json.loads(msg))
@@ -356,9 +356,9 @@ asyncio.run(main())`}</CodeBlock>
     "auth_cache_ttl_seconds": 300
   },
   "symbols": [
-    { "name": "BTC-USD", "id": 1, "mid": 50000.0, "max_long": 100, "max_short": 100 },
-    { "name": "ETH-USD", "id": 2, "mid": 3000.0  },
-    { "name": "LTC-USD", "id": 3, "mid": 100.0   }
+    { "name": "ES",  "id": 1, "mid": 7400.0,  "max_long": 100, "max_short": 100 },
+    { "name": "NKD", "id": 2, "mid": 67475.0 },
+    { "name": "SPY", "id": 6, "mid": 740.0   }
   ],
   "market_maker": {
     "enabled": true,
@@ -405,7 +405,7 @@ asyncio.run(main())`}</CodeBlock>
                 ['GET',  <Mono key="s">/status</Mono>,                                    '—',         'Server status + metrics'],
                 ['GET',  <Mono key="m">/metrics</Mono>,                                   '—',         'Counters: connections, orders, trades'],
                 ['GET',  <Mono key="sy">/symbols</Mono>,                                  '—',         'Configured symbol registry (name, id, mid, caps)'],
-                ['GET',  <Mono key="o">/orderbook?symbol=&lt;sym&gt;</Mono>,              'optional',  'L2 snapshot (top 20 levels)'],
+                ['GET',  <Mono key="o">/orderbook?symbol=&lt;sym&gt;</Mono>,              'optional',  'L2 snapshot (symbol required)'],
                 ['GET',  <Mono key="t">/trades?symbol=&lt;sym&gt;&amp;limit=N</Mono>,     'optional',  'Recent trades from the in-memory cache'],
                 ['GET',  <Mono key="th">/trades/historical?symbol=&hellip;&amp;from=&amp;to=</Mono>, 'optional',  'Trades from SQLite (paged, capped 50k)'],
                 ['GET',  <Mono key="b">/bots</Mono>,                                      '—',         'Live bot/strategy snapshot for the dashboard'],
@@ -434,7 +434,6 @@ asyncio.run(main())`}</CodeBlock>
   "total_connections": 17,
   "active_connections": 3,
   "total_requests": 89,
-  "total_errors": 0,
   "ws_connections": 2,
   "orders_accepted": 14,
   "orders_rejected": 1,
@@ -450,33 +449,33 @@ asyncio.run(main())`}</CodeBlock>
             </p>
             <CodeBlock lang="json">{`{
   "symbols": [
-    { "name": "BTC-USD", "id": 1, "mid": 50000.0, "max_long": 100, "max_short": 100 },
-    { "name": "ETH-USD", "id": 2, "mid": 3000.0  },
-    { "name": "LTC-USD", "id": 3, "mid": 100.0   }
+    { "name": "ES",  "id": 1, "mid": 7400.0,  "max_long": 100, "max_short": 100 },
+    { "name": "NKD", "id": 2, "mid": 67475.0 },
+    { "name": "SPY", "id": 6, "mid": 740.0   }
   ]
 }`}</CodeBlock>
 
             <h3 id="rest-orderbook" className="text-lg font-semibold text-white mt-6 mb-2">GET /orderbook</h3>
             <p className="text-slate-300 text-sm">
-              Returns the top 20 levels per side. Symbol can be the canonical name
-              (<Mono>BTC-USD</Mono>) or shorthand (<Mono>BTC</Mono>).
+              Latest snapshot from the in-memory cache. <Mono>symbol</Mono> is required —
+              a book is per-instrument, so there is no default; omitting it returns 400.
             </p>
             <CodeBlock lang="json">{`{
-  "symbol": "BTC-USD",
+  "symbol": "ES",
   "timestamp": "1777800000000",
-  "bids": [{ "price": 49950, "size": 10, "total": 499500 }, ...],
-  "asks": [{ "price": 50050, "size": 10, "total": 500500 }, ...]
+  "bids": [{ "price": 7399.75, "size": 10, "total": 73997.5 }, ...],
+  "asks": [{ "price": 7400.25, "size": 10, "total": 74002.5 }, ...]
 }`}</CodeBlock>
 
             <h3 id="rest-trades" className="text-lg font-semibold text-white mt-6 mb-2">GET /trades</h3>
             <p className="text-slate-300 text-sm">
-              Recent trades from the in-memory cache. Use <Mono>?symbol=BTC-USD</Mono> to
+              Recent trades from the in-memory cache. Use <Mono>?symbol=ES</Mono> to
               filter and <Mono>?limit=N</Mono> to cap (max 500). For deep history, hit{' '}
               <Mono>/trades/historical</Mono>, which pages from SQLite.
             </p>
             <CodeBlock lang="json">{`{
   "trades": [
-    { "trade_id": 98, "symbol": "BTC-USD", "price": 49995.0, "quantity": 50, "taker_side": "Buy", "ts": 1777800000123 }
+    { "trade_id": 98, "symbol": "ES", "price": 7400.25, "quantity": 50, "taker_side": "Buy", "ts": 1777800000123 }
   ]
 }`}</CodeBlock>
 
@@ -508,7 +507,8 @@ asyncio.run(main())`}</CodeBlock>
 
             <h3 id="rest-auth" className="text-lg font-semibold text-white mt-6 mb-2">POST /auth</h3>
             <p className="text-slate-300 text-sm">
-              Validates the API key sent via <Mono>Api-Key:</Mono>, <Mono>Authorization: Bearer</Mono>, or <Mono>?api_key=</Mono>.
+              Validates the API key sent via <Mono>Api-Key:</Mono> or{' '}
+              <Mono>Authorization: Bearer</Mono>. Header-only — <Mono>?api_key=</Mono> is not accepted.
             </p>
             <CodeBlock lang="bash">{`$ curl -s -X POST -H 'Api-Key: sk_live_…' http://localhost:9090/auth
 {"authenticated":true,"user_id":"user_abc123"}`}</CodeBlock>
@@ -524,8 +524,15 @@ asyncio.run(main())`}</CodeBlock>
             <ul className="list-disc list-inside text-slate-300 text-sm space-y-1 my-2">
               <li><Mono>Api-Key: sk_live_…</Mono></li>
               <li><Mono>Authorization: Bearer sk_live_…</Mono></li>
-              <li><Mono>?api_key=sk_live_…</Mono> (query string)</li>
+              <li>
+                <Mono>Sec-WebSocket-Protocol: engine.bearer, sk_live_…</Mono> — for
+                browsers, which can&apos;t set headers on a WebSocket upgrade
+              </li>
             </ul>
+            <p className="text-slate-300 text-sm">
+              Query-string auth (<Mono>?api_key=</Mono>) is deliberately not accepted:
+              URLs leak into proxy and browser-history logs.
+            </p>
             <p className="text-slate-300 text-sm">
               The engine validates against the configured backend
               (<Mono>backend_url</Mono>). On success the upgrade completes (HTTP 101); on
@@ -554,11 +561,11 @@ asyncio.run(main())`}</CodeBlock>
             <CodeBlock lang="json">{`{
   "t": "place_order",
   "client_order_id": "abc",
-  "symbol": "BTC-USD",
+  "symbol": "ES",
   "side": "Buy",
   "type": "Limit",
   "quantity": 100,
-  "limit_price": 50000.0
+  "limit_price": 7400.0
 }`}</CodeBlock>
             <p className="text-slate-300 text-sm">
               <Mono>type</Mono> is <Mono>Limit</Mono> or <Mono>Market</Mono>.
@@ -575,9 +582,9 @@ asyncio.run(main())`}</CodeBlock>
             </p>
 
             <h3 id="ws-subscribe" className="text-lg font-semibold text-white mt-5 mb-2">subscribe / unsubscribe</h3>
-            <CodeBlock lang="json">{`{ "t": "subscribe",   "channel": "book",   "symbol": "BTC-USD", "depth": 20 }
-{ "t": "subscribe",   "channel": "trades", "symbol": "BTC-USD" }
-{ "t": "unsubscribe", "channel": "book",   "symbol": "BTC-USD" }`}</CodeBlock>
+            <CodeBlock lang="json">{`{ "t": "subscribe",   "channel": "book",   "symbol": "ES", "depth": 20 }
+{ "t": "subscribe",   "channel": "trades", "symbol": "ES" }
+{ "t": "unsubscribe", "channel": "book",   "symbol": "ES" }`}</CodeBlock>
             <p className="text-slate-300 text-sm">
               On subscribing to <Mono>book</Mono>, the server immediately pushes a snapshot.
             </p>
@@ -591,7 +598,7 @@ asyncio.run(main())`}</CodeBlock>
   "t": "order_ack",
   "order_id": 12345,
   "client_order_id": "abc",
-  "symbol": "BTC-USD",
+  "symbol": "ES",
   "side": "Buy",
   "status": "Pending",
   "ts": 1777800000000
@@ -602,14 +609,14 @@ asyncio.run(main())`}</CodeBlock>
   "t": "order_fill",
   "order_id": 12345,
   "client_order_id": "abc",
-  "symbol": "BTC-USD",
+  "symbol": "ES",
   "side": "Buy",
   "status": "PartiallyFilled",
-  "price": 49995.0,
+  "price": 7400.25,
   "quantity": 50,
   "remaining": 50,
   "total_filled": 50,
-  "avg_price": 49995.0,
+  "avg_price": 7400.25,
   "trade_id": 98,
   "ts": 1777800000123
 }`}</CodeBlock>
@@ -634,19 +641,19 @@ asyncio.run(main())`}</CodeBlock>
             <h3 className="text-lg font-semibold text-white mt-5 mb-2">book (snapshot &amp; deltas)</h3>
             <CodeBlock lang="json">{`{
   "t": "book",
-  "symbol": "BTC-USD",
+  "symbol": "ES",
   "snapshot": true,
   "ts": 1777800000000,
-  "bids": [[49950, 10], [49940, 5], ...],
-  "asks": [[50050, 10], [50060, 8], ...]
+  "bids": [[7399.75, 10], [7399.50, 5], ...],
+  "asks": [[7400.25, 10], [7400.50, 8], ...]
 }`}</CodeBlock>
 
             <h3 className="text-lg font-semibold text-white mt-5 mb-2">trade</h3>
             <CodeBlock lang="json">{`{
   "t": "trade",
-  "symbol": "BTC-USD",
+  "symbol": "ES",
   "trade_id": 98,
-  "price": 49995.0,
+  "price": 7400.25,
   "quantity": 50,
   "taker_side": "Buy",
   "ts": 1777800000123
@@ -682,15 +689,15 @@ asyncio.run(main())`}</CodeBlock>
             <KvTable
               headers={['Name', 'ID', 'Default mid']}
               rows={[
-                [<Mono key="b">BTC-USD</Mono>, '1', '50000.0'],
-                [<Mono key="e">ETH-USD</Mono>, '2', '3000.0'],
-                [<Mono key="l">LTC-USD</Mono>, '3', '100.0'],
+                [<Mono key="es">ES</Mono>,   '1', '7400.0'],
+                [<Mono key="nkd">NKD</Mono>, '2', '67475.0'],
+                [<Mono key="spy">SPY</Mono>, '6', '740.0'],
               ]}
             />
             <p className="text-slate-300 text-sm mt-2">
-              The REST <Mono>/orderbook</Mono> handler accepts case-insensitive shorthand
-              (<Mono>btc</Mono>, <Mono>BTC</Mono>, <Mono>BTC-USD</Mono> all resolve to the
-              same book).
+              Symbol lookup is case-insensitive (<Mono>es</Mono> and <Mono>ES</Mono> resolve
+              to the same book). The table above shows a default install; read{' '}
+              <Mono>GET /symbols</Mono> for what a given server actually lists.
             </p>
           </Section>
 

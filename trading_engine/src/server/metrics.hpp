@@ -5,6 +5,12 @@
 #include <sstream>
 #include <string>
 
+// Injected by CMake from PROJECT_VERSION (see CMakeLists.txt). The fallback only
+// applies to builds that bypass CMake.
+#ifndef BUBBLES_VERSION
+#define BUBBLES_VERSION "dev"
+#endif
+
 namespace TradingSystem {
 
 class ServerMetrics {
@@ -12,7 +18,6 @@ public:
     std::atomic<uint64_t> totalConnections{0};
     std::atomic<uint64_t> activeConnections{0};
     std::atomic<uint64_t> totalRequests{0};
-    std::atomic<uint64_t> totalErrors{0};
     std::atomic<uint64_t> wsConnections{0};
     std::atomic<uint64_t> ordersAccepted{0};
     std::atomic<uint64_t> ordersRejected{0};
@@ -22,7 +27,6 @@ public:
     void recordConnection() { ++totalConnections; ++activeConnections; }
     void closeConnection() { --activeConnections; }
     void recordRequest() { ++totalRequests; }
-    void recordError() { ++totalErrors; }
 
     uint64_t getUptimeSeconds() const {
         if (startTime == 0) return 0;
@@ -38,7 +42,6 @@ public:
             << "  \"total_connections\": " << totalConnections.load() << ",\n"
             << "  \"active_connections\": " << activeConnections.load() << ",\n"
             << "  \"total_requests\": " << totalRequests.load() << ",\n"
-            << "  \"total_errors\": " << totalErrors.load() << ",\n"
             << "  \"ws_connections\": " << wsConnections.load() << ",\n"
             << "  \"orders_accepted\": " << ordersAccepted.load() << ",\n"
             << "  \"orders_rejected\": " << ordersRejected.load() << ",\n"
@@ -52,7 +55,7 @@ public:
         oss << "{\n"
             << "  \"status\": \"running\",\n"
             << "  \"port\": " << port << ",\n"
-            << "  \"version\": \"1.0.0\",\n"
+            << "  \"version\": \"" << BUBBLES_VERSION << "\",\n"
             << "  \"uptime_seconds\": " << getUptimeSeconds() << ",\n"
             << "  \"metrics\": " << getMetricsJson() << "\n"
             << "}";

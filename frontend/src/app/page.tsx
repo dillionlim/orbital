@@ -49,7 +49,7 @@ export default function LandingPage() {
             </span>
           </h1>
           <p className="text-lg text-slate-400 mb-8">
-            Connect your strategies directly to our low-latency execution engine. 
+            Connect your strategies directly to our low-latency execution engine.
             Visualize order books, manage bots, and backtest in real-time.
           </p>
           {isSignedIn ? (

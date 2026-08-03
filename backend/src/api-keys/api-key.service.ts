@@ -7,7 +7,6 @@ export class ApiKeyService {
   constructor(private prisma: PrismaService) {}
 
   async createApiKey(clerkId: string, email: string, username?: string) {
-    // 1. Ensure User exists
     let user = await this.prisma.user.findUnique({
       where: { clerkId },
     });
@@ -21,22 +20,20 @@ export class ApiKeyService {
         },
       });
     } else if (username && user.username !== username) {
-      // Update username if it changed or was missing
       user = await this.prisma.user.update({
         where: { clerkId },
         data: { username },
       });
     }
 
-    // 2. Generate API Key
     const key = `sk_live_${crypto.randomBytes(16).toString('hex')}`;
 
-    // 3. Ensure single API key per user: delete existing keys before creating new one
+    // Schema is 1:1 (User.apiKey is singular), so issuing a new key must clear
+    // any existing one first — otherwise the create violates the unique constraint.
     await this.prisma.apiKey.deleteMany({
       where: { userId: user.id },
     });
 
-    // 4. Save to DB
     const apiKey = await this.prisma.apiKey.create({
       data: {
         key,
@@ -60,7 +57,6 @@ export class ApiKeyService {
   }
 
   async deleteApiKey(id: string, clerkId: string) {
-    // Verify ownership
     const apiKey = await this.prisma.apiKey.findUnique({
       where: { id },
       include: { user: true },

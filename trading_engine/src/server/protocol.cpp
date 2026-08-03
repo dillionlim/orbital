@@ -13,8 +13,6 @@ const char* type_name(OrderType t) {
     switch (t) {
         case OrderType::Market: return "Market";
         case OrderType::Limit: return "Limit";
-        case OrderType::Stop: return "Stop";
-        case OrderType::StopLimit: return "StopLimit";
     }
     return "Unknown";
 }
@@ -25,7 +23,6 @@ const char* status_name(OrderStatus s) {
         case OrderStatus::Filled: return "Filled";
         case OrderStatus::Cancelled: return "Cancelled";
         case OrderStatus::Rejected: return "Rejected";
-        case OrderStatus::Expired: return "Expired";
     }
     return "Unknown";
 }

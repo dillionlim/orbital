@@ -38,31 +38,6 @@ std::string to_lower(std::string s) {
     return s;
 }
 
-// Pick the first symbol from `symbols_csv` whose stripped-suffix prefix
-// (e.g. "BTC" from "BTC-USD") appears in `chosen`. Lets the model say
-// "BTC" or "btc-usd" or "Bitcoin (BTC)" and still resolve to the right
-// internal name.
-std::string resolve_symbol(const std::string& chosen, const std::string& symbols_csv) {
-    if (chosen.empty()) return "";
-    const std::string lc = to_lower(chosen);
-    std::stringstream ss(symbols_csv);
-    std::string sym;
-    while (std::getline(ss, sym, ',')) {
-        // trim
-        size_t a = 0, b = sym.size();
-        while (a < b && std::isspace(static_cast<unsigned char>(sym[a]))) ++a;
-        while (b > a && std::isspace(static_cast<unsigned char>(sym[b - 1]))) --b;
-        const std::string s = sym.substr(a, b - a);
-        if (s.empty()) continue;
-        const std::string ls = to_lower(s);
-        if (ls == lc) return s;
-        // Match by prefix-before-dash (e.g. "BTC" → "BTC-USD").
-        const auto dash = ls.find('-');
-        if (dash != std::string::npos && ls.substr(0, dash) == lc) return s;
-    }
-    return "";
-}
-
 NewsDirection parse_direction(const std::string& s) {
     const std::string lc = to_lower(s);
     if (lc == "buy" || lc == "long" || lc == "bullish")  return NewsDirection::Buy;
@@ -134,6 +109,41 @@ std::optional<std::string> run_command_with_input(const std::string& cmd,
 
 }  // namespace
 
+// Resolve the model's chosen instrument against the catalog built by
+// NewsAnalyzer, which is newline-separated "NAME — description" (see
+// news_analyzer.cpp; the same shape is spelled out to the model in the prompt).
+// Each line is cut at the first " — " so only the wire name is compared, and the
+// match is case-insensitive so the model may answer "es" or "ES".
+//
+// A line with no description is a bare name and is used as-is. Anything the
+// model returns that isn't a configured name resolves to "" and the caller
+// drops the signal — that is the intended behaviour, not an error.
+//
+// Declared in the header so news_symbol_test.cpp can cover the catalog format:
+// this previously split on ',' while the producer emitted newlines, which made
+// every signal resolve to "" and silently disabled news-driven trading.
+std::string resolve_symbol(const std::string& chosen, const std::string& symbol_catalog) {
+    if (chosen.empty()) return "";
+    const std::string lc = to_lower(chosen);
+
+    std::stringstream ss(symbol_catalog);
+    std::string line;
+    while (std::getline(ss, line)) {
+        // Keep only the name: everything before the first " — " separator.
+        const auto sep = line.find(" \xE2\x80\x94 ");
+        if (sep != std::string::npos) line.resize(sep);
+
+        size_t a = 0, b = line.size();
+        while (a < b && std::isspace(static_cast<unsigned char>(line[a]))) ++a;
+        while (b > a && std::isspace(static_cast<unsigned char>(line[b - 1]))) --b;
+        const std::string name = line.substr(a, b - a);
+        if (name.empty()) continue;
+
+        if (to_lower(name) == lc) return name;
+    }
+    return "";
+}
+
 GeminiClient::GeminiClient(std::string api_key, std::string model)
     : api_key_(std::move(api_key)), model_(std::move(model)) {
     key_ok_ = key_looks_safe(api_key_);
@@ -144,7 +154,7 @@ GeminiClient::GeminiClient(std::string api_key, std::string model)
 
 GeminiResult GeminiClient::classify(const std::string& headline,
                                     const std::string& summary,
-                                    const std::string& symbols_csv) const {
+                                    const std::string& symbol_catalog) const {
     if (!key_ok_) return GeminiResult{std::nullopt, GeminiError::AuthFailure};
 
     // Build the request body. responseSchema constrains the model to a
@@ -152,7 +162,7 @@ GeminiResult GeminiClient::classify(const std::string& headline,
     const std::string prompt =
         "You are an equity-market analyst mapping financial news to tradeable "
         "index futures and regional ETFs.\n\n"
-        "Instruments (NAME — what it tracks):\n" + symbols_csv + "\n"
+        "Instruments (NAME — what it tracks):\n" + symbol_catalog + "\n"
         "Rules:\n"
         "- Pick the SINGLE instrument whose underlying market is most affected by "
         "the news; return NONE if the news has no clear link to any of them.\n"
@@ -269,7 +279,7 @@ GeminiResult GeminiClient::classify(const std::string& headline,
 
     NewsAnalysis out;
     if (inner.HasMember("symbol") && inner["symbol"].IsString()) {
-        out.symbol_name = resolve_symbol(inner["symbol"].GetString(), symbols_csv);
+        out.symbol_name = resolve_symbol(inner["symbol"].GetString(), symbol_catalog);
     }
     if (inner.HasMember("direction") && inner["direction"].IsString()) {
         out.direction = parse_direction(inner["direction"].GetString());
