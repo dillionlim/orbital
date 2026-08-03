@@ -7,6 +7,7 @@
 
 #include "common/log.hpp"
 #include "common/time.hpp"
+#include "market_maker/quote_math.hpp"
 
 namespace TradingSystem {
 
@@ -78,15 +79,6 @@ void MarketMakerBot::update_reference_price(SymbolId symbol, Price price) {
 
 Price MarketMakerBot::anchor_of(const State& st) const {
     return (cfg_.track_trades && st.last_trade_price > 0) ? st.last_trade_price : st.mid;
-}
-
-// Per-symbol tick derived from the anchor's magnitude (~4 significant figures),
-// floored at 0.01. e.g. 66020→1.0, 6155→0.1, 740→0.01, 22→0.01. Keeps ladder
-// levels visually distinct across instruments spanning a 3000x price range.
-static Price adaptive_tick(Price p) {
-    if (p <= 0) return 0.01;
-    const double tick = std::pow(10.0, std::floor(std::log10(p)) - 4.0);
-    return std::max(tick, 0.01);
 }
 
 void MarketMakerBot::post_ladder_locked(State& st, OrderSide side) {
@@ -276,11 +268,12 @@ void MarketMakerBot::refresh_loop() {
         std::lock_guard<std::mutex> lk(mu_);
         for (auto& [_, st] : states_) {
             const Price a = anchor_of(st);
-            // Repaint when the anchor crosses to a different tick (so the top of
-            // book keeps hugging the real value) or when a side has been eaten down.
+            // Repaint when the anchor has drifted past the configured threshold
+            // (so the top of book keeps hugging the real value) or when a side
+            // has been eaten down.
             const Price tick = adaptive_tick(a > 0 ? a : st.quoted_anchor);
-            const bool moved = st.quoted_anchor <= 0 ||
-                std::floor(a / tick) != std::floor(st.quoted_anchor / tick);
+            const bool moved =
+                anchor_has_drifted(cfg_.requote_drift_bps, st.quoted_anchor, a, tick);
             const bool depleted = static_cast<int>(st.bid_ids.size()) < min_levels ||
                                   static_cast<int>(st.ask_ids.size()) < min_levels;
             if (moved || depleted) requote_locked(st);

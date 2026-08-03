@@ -39,11 +39,11 @@ struct MarketMakerConfig {
     // The book is priced on a per-symbol tick derived from the anchor's
     // magnitude; the inside (best bid/ask) brackets the real value by one tick.
 
-    // Event-driven requote: when an external trade prints at a price more
-    // than this many bps from the anchor of our currently-resting quote,
-    // cancel both sides and repost at the new anchor. 0 = use a sane
-    // default of max(spread_bps/2, 5) so the MM doesn't sit stale a full
-    // half-spread away when news bots stampede the book.
+    // Requote threshold: once the anchor has moved this many bps from the one
+    // the resting ladder was built on, cancel both sides and repost at the new
+    // anchor. 0 = one tick, the grid the ladder is priced on and the smallest
+    // move that can reprice it at all. Raise it to let quotes sit longer (fewer
+    // cancels, staler top of book).
     int requote_drift_bps = 0;
 };
 
