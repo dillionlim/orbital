@@ -222,6 +222,26 @@ add_engine_test_case(matching_engine_tests rejects_market_order_when_book_is_emp
 add_engine_test_case(matching_engine_tests emits_ack_fills_trade_print_and_book_delta_for_a_match)
 add_engine_test_case(matching_engine_tests publishes_book_delta_when_self_trade_prevention_empties_the_book)
 
+add_executable(dispatcher_tests EXCLUDE_FROM_ALL
+    tests/dispatcher_test.cpp
+    src/server/dispatcher.cpp
+    src/server/session.cpp
+    src/server/protocol.cpp
+    src/server/snapshot_store.cpp
+    src/server/bot_tracker.cpp
+    src/server/position_tracker.cpp
+    src/server/ws_frame.cpp
+    src/engine/sequencer.cpp
+    src/engine/matching_engine.cpp
+    src/book/order_book.cpp
+    src/common/config.cpp
+)
+configure_engine_test(dispatcher_tests)
+add_engine_test_case(dispatcher_tests assigns_the_order_id_before_the_shard_can_report_it)
+add_engine_test_case(dispatcher_tests reaps_orders_that_fill_immediately)
+add_engine_test_case(dispatcher_tests prunes_filled_and_cancelled_orders_from_the_session)
+add_engine_test_case(dispatcher_tests keeps_tracking_orders_that_are_still_working)
+
 add_executable(news_symbol_tests EXCLUDE_FROM_ALL
     tests/news_symbol_test.cpp
     src/news_bot/gemini_client.cpp

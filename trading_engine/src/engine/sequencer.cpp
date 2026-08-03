@@ -23,7 +23,8 @@ void Sequencer::stop_shards() {
     shards_.clear();
 }
 
-OrderId Sequencer::submit_place(PlaceOrderCmd cmd) {
+OrderId Sequencer::submit_place(PlaceOrderCmd cmd,
+                                const std::function<void(OrderId)>& on_id_assigned) {
     auto it = shards_.find(cmd.symbol);
     if (it == shards_.end()) {
         // Synthesize a Reject so the client gets an error.
@@ -48,6 +49,10 @@ OrderId Sequencer::submit_place(PlaceOrderCmd cmd) {
         std::lock_guard<std::mutex> lk(order_index_mu_);
         order_to_symbol_[cmd.assigned_id] = cmd.symbol;
     }
+
+    // Last point at which the caller is alone with this order. Everything after
+    // the submit below races the shard thread.
+    if (on_id_assigned) on_id_assigned(cmd.assigned_id);
 
     if (!it->second->submit(InboundCmd{cmd})) {
         LOG_WARN("sequencer: shard queue full for symbol_id=" << cmd.symbol);

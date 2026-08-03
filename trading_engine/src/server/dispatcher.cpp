@@ -156,16 +156,31 @@ void Dispatcher::handle_place(SessionPtr s, const InboundPlaceOrder& p) {
     cmd.is_internal = s->is_internal;
     cmd.ts = now_ms();
 
-    OrderId oid = seq_.submit_place(std::move(cmd));
+    // Register ownership from inside submit_place, before the command reaches the
+    // shard. Recording it afterwards loses the race whenever the order is matched
+    // and reported terminal on the shard thread before submit_place() returns: the
+    // reap in on_outbound runs first and finds nothing, then this writes an entry
+    // for an order that is already dead and will never be reaped again.
+    OrderId oid = seq_.submit_place(std::move(cmd), [this, &s](OrderId assigned) {
+        {
+            std::lock_guard<std::mutex> lk(order_owner_mu_);
+            order_owner_[assigned] = s->id;
+        }
+        {
+            std::lock_guard<std::mutex> lk(s->orders_mu);
+            s->own_orders.insert(assigned);
+        }
+    });
     if (oid != 0) {
         metrics_.ordersAccepted++;
-        std::lock_guard<std::mutex> lk(order_owner_mu_);
-        order_owner_[oid] = s->id;
-        std::lock_guard<std::mutex> lk2(s->orders_mu);
-        s->own_orders.insert(oid);
     } else {
         metrics_.ordersRejected++;
     }
+}
+
+size_t Dispatcher::tracked_orders() const {
+    std::lock_guard<std::mutex> lk(order_owner_mu_);
+    return order_owner_.size();
 }
 
 void Dispatcher::handle_cancel(SessionPtr s, const InboundCancelOrder& c) {
@@ -236,11 +251,34 @@ void Dispatcher::on_outbound(const OutboundEvent& ev) {
             if (e.kind == ExecutionReport::Kind::Fill && e.session_id != kInternalSession) {
                 if (e.last_quantity > 0) metrics_.tradesMatched++;
             }
-            // Reap order_owner_ on terminal states.
-            if (e.kind == ExecutionReport::Kind::CancelAck ||
-                (e.kind == ExecutionReport::Kind::Fill && e.remaining == 0)) {
-                std::lock_guard<std::mutex> lk(order_owner_mu_);
-                order_owner_.erase(e.order_id);
+            // Reap per-order bookkeeping on terminal states. Rejects count: a
+            // shard-side reject (queue_full) still had an owner registered up
+            // front, and nothing else would ever clear it.
+            const bool terminal =
+                e.kind == ExecutionReport::Kind::CancelAck ||
+                e.kind == ExecutionReport::Kind::Reject ||
+                (e.kind == ExecutionReport::Kind::Fill && e.remaining == 0);
+            if (terminal && e.order_id != 0) {
+                SessionId owner = 0;
+                {
+                    std::lock_guard<std::mutex> lk(order_owner_mu_);
+                    auto it = order_owner_.find(e.order_id);
+                    if (it != order_owner_.end()) {
+                        owner = it->second;
+                        order_owner_.erase(it);
+                    }
+                }
+                // Session::own_orders was never pruned at all. It is what the
+                // pause/remove path walks to cancel a bot's resting orders, so a
+                // long-lived bot ended up firing a cancel for every order it had
+                // ever placed — thousands of not_found rejects pushed straight
+                // back down its own socket.
+                if (owner != 0) {
+                    if (auto s = sessions_.by_id(owner)) {
+                        std::lock_guard<std::mutex> lk(s->orders_mu);
+                        s->own_orders.erase(e.order_id);
+                    }
+                }
             }
         } else if constexpr (std::is_same_v<T, TradePrint>) {
             // Broadcast to everyone subscribed to this symbol's trades, plus book subscribers.
