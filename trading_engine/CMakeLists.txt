@@ -110,6 +110,8 @@ add_engine_test_case(order_book_tests fills_same_price_level_in_arrival_order)
 add_engine_test_case(order_book_tests sweeps_multiple_price_levels_with_volume_weighted_average)
 add_engine_test_case(order_book_tests partially_fills_crossing_limit_and_rests_remainder)
 add_engine_test_case(order_book_tests cancels_partially_filled_resting_order_and_keeps_level_qty_honest)
+add_engine_test_case(order_book_tests reports_the_makers_own_fill_state_on_fills_and_cancels)
+add_engine_test_case(order_book_tests reports_maker_fill_state_on_self_trade_prevention)
 add_engine_test_case(order_book_tests rejects_cancel_of_unknown_order)
 add_engine_test_case(order_book_tests allows_internal_cancel_to_bypass_owner_check)
 add_engine_test_case(order_book_tests cancels_every_same_user_maker_at_a_level)
@@ -221,6 +223,28 @@ add_engine_test_case(matching_engine_tests publishes_initial_snapshot_on_start)
 add_engine_test_case(matching_engine_tests rejects_market_order_when_book_is_empty)
 add_engine_test_case(matching_engine_tests emits_ack_fills_trade_print_and_book_delta_for_a_match)
 add_engine_test_case(matching_engine_tests publishes_book_delta_when_self_trade_prevention_empties_the_book)
+add_engine_test_case(matching_engine_tests closes_out_the_unfilled_remainder_of_a_market_order)
+add_engine_test_case(matching_engine_tests leaves_a_fully_filled_market_order_alone)
+
+add_executable(dispatcher_tests EXCLUDE_FROM_ALL
+    tests/dispatcher_test.cpp
+    src/server/dispatcher.cpp
+    src/server/session.cpp
+    src/server/protocol.cpp
+    src/server/snapshot_store.cpp
+    src/server/bot_tracker.cpp
+    src/server/position_tracker.cpp
+    src/server/ws_frame.cpp
+    src/engine/sequencer.cpp
+    src/engine/matching_engine.cpp
+    src/book/order_book.cpp
+    src/common/config.cpp
+)
+configure_engine_test(dispatcher_tests)
+add_engine_test_case(dispatcher_tests assigns_the_order_id_before_the_shard_can_report_it)
+add_engine_test_case(dispatcher_tests reaps_orders_that_fill_immediately)
+add_engine_test_case(dispatcher_tests prunes_filled_and_cancelled_orders_from_the_session)
+add_engine_test_case(dispatcher_tests keeps_tracking_orders_that_are_still_working)
 
 add_executable(sequencer_tests EXCLUDE_FROM_ALL
     tests/sequencer_test.cpp
