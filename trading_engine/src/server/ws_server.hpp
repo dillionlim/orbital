@@ -10,6 +10,7 @@
 #include "server/metrics.hpp"
 #include "server/rest_handlers.hpp"
 #include "server/session.hpp"
+#include "server/ws_frame.hpp"
 
 namespace TradingSystem {
 
@@ -29,7 +30,7 @@ public:
 private:
     void accept_loop();
     void handle_connection(int sockfd);
-    void session_loop(SessionPtr s);
+    void session_loop(SessionPtr s, WsReader& in);
     void writer_loop(SessionPtr s);
 
     // Connection threads are detached, so stop() must shut their sockets down (to wake

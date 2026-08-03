@@ -286,6 +286,16 @@ void WsServer::handle_connection(int sockfd) {
         return;
     }
 
+    // read_http_headers stops at the terminator but keeps everything it read, so
+    // a client that pipelined its first frame behind the upgrade already had
+    // those bytes consumed. They will not come back off the socket — hand them
+    // to the frame reader or the frame is silently lost.
+    std::string_view pipelined;
+    if (const size_t end = req.find("\r\n\r\n"); end != std::string::npos) {
+        pipelined = std::string_view(req).substr(end + 4);
+    }
+    WsReader reader(sockfd, pipelined);
+
     auto sess = sessions_.create(sockfd, api_key, auth_res.user_id);
     LOG_INFO("ws_server: session id=" << sess->id << " user=" << sess->user_id
                                        << " connected (fd=" << sockfd << ")");
@@ -296,7 +306,7 @@ void WsServer::handle_connection(int sockfd) {
     dispatcher_.on_connect(sess);
 
     // Reader loop runs on this thread.
-    session_loop(sess);
+    session_loop(sess, reader);
 
     // Wake the writer and let it drain, then join. After this no other thread can write
     // to sockfd, which is what makes the close below safe against fd reuse.
@@ -368,10 +378,10 @@ void WsServer::wait_for_conns() {
     conn_cv_.wait(lk, [&] { return active_conns_ == 0; });
 }
 
-void WsServer::session_loop(SessionPtr s) {
+void WsServer::session_loop(SessionPtr s, WsReader& in) {
     while (running_.load() && s->alive.load()) {
         WsFrame f;
-        if (!ws_read_frame(s->sockfd, f)) break;
+        if (!ws_read_frame(in, f)) break;
         if (f.opcode == WsOpcode::Close) {
             std::lock_guard<std::mutex> lk(s->write_mu);
             ws_write_close(s->sockfd);

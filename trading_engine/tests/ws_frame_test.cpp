@@ -358,6 +358,76 @@ void passes_unknown_opcodes_through() {
     require_eq(opcode_byte(f.opcode), static_cast<uint8_t>(0xF), "opcode is only the low nibble");
 }
 
+// The bug this class exists for: read_http_headers reads in blocks, so a client
+// that pipelines its first frame behind the upgrade request has those bytes
+// consumed into the header buffer. Reading straight from the fd afterwards loses
+// the frame — it is never coming back off the socket.
+void replays_bytes_pre_read_with_the_headers() {
+    SocketPair sp;
+    const uint8_t key[4] = {0x3C, 0x5E, 0x71, 0x02};
+    const std::string headers =
+        "GET /ws HTTP/1.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n";
+
+    // Handshake and the first two frames arrive in one write, as they would in
+    // one TCP segment.
+    std::vector<uint8_t> wire(headers.begin(), headers.end());
+    for (const auto& frame : {masked_frame(true, WsOpcode::Text, "{\"t\":\"hello\"}", key),
+                              masked_frame(true, WsOpcode::Text, "second", key)}) {
+        wire.insert(wire.end(), frame.begin(), frame.end());
+    }
+    write_bytes(sp.wr, wire);
+    sp.close_wr();
+
+    std::string req;
+    require(read_http_headers(sp.rd, req, 65536, 1000), "headers should be read");
+    const size_t end = req.find("\r\n\r\n");
+    require(end != std::string::npos, "terminator present");
+    const std::string_view pipelined = std::string_view(req).substr(end + 4);
+    require(!pipelined.empty(), "the frames really did arrive with the headers");
+
+    WsReader reader(sp.rd, pipelined);
+    WsFrame f;
+    require(ws_read_frame(reader, f), "the pipelined frame should be recoverable");
+    require_eq(f.payload, std::string("{\"t\":\"hello\"}"), "first frame payload");
+    require(ws_read_frame(reader, f), "and so should the one after it");
+    require_eq(f.payload, std::string("second"), "second frame payload");
+}
+
+// A reader spanning the buffer boundary must stitch the two sources together
+// rather than short-read at the seam.
+void reads_across_the_buffer_and_socket_boundary() {
+    SocketPair sp;
+    const uint8_t key[4] = {0x0F, 0xA1, 0x3B, 0x77};
+    const auto frame = masked_frame(true, WsOpcode::Text, std::string(300, 'x'), key);
+
+    // Split the frame mid-payload: the head is "already read", the tail arrives
+    // on the socket.
+    const size_t split = 12;
+    const std::string head(frame.begin(), frame.begin() + split);
+    write_bytes(sp.wr, std::vector<uint8_t>(frame.begin() + split, frame.end()));
+    sp.close_wr();
+
+    WsReader reader(sp.rd, head);
+    WsFrame f;
+    require(ws_read_frame(reader, f), "a frame split across both sources should parse");
+    require_eq(f.payload, std::string(300, 'x'), "and its payload should be whole");
+}
+
+// With nothing pre-read the reader is just the socket, which is what the
+// existing int overload relies on.
+void reads_straight_from_the_socket_when_nothing_was_pre_read() {
+    SocketPair sp;
+    const uint8_t key[4] = {0x44, 0x55, 0x66, 0x77};
+    write_bytes(sp.wr, masked_frame(true, WsOpcode::Text, "plain", key));
+    sp.close_wr();
+
+    WsReader reader(sp.rd);
+    require(!reader.has_buffered(), "nothing is buffered");
+    WsFrame f;
+    require(ws_read_frame(reader, f), "the frame should parse");
+    require_eq(f.payload, std::string("plain"), "payload");
+}
+
 // A normal request ends at \r\n\r\n; the reader does not block waiting for a
 // body that has not arrived, and the socket stays usable afterwards.
 void reads_headers_terminated_by_crlfcrlf() {
@@ -502,6 +572,11 @@ const std::vector<TestCase>& test_cases() {
         {"reads_headers_terminated_by_crlfcrlf", reads_headers_terminated_by_crlfcrlf},
         {"keeps_body_bytes_that_arrive_in_the_same_read",
          keeps_body_bytes_that_arrive_in_the_same_read},
+        {"replays_bytes_pre_read_with_the_headers", replays_bytes_pre_read_with_the_headers},
+        {"reads_across_the_buffer_and_socket_boundary",
+         reads_across_the_buffer_and_socket_boundary},
+        {"reads_straight_from_the_socket_when_nothing_was_pre_read",
+         reads_straight_from_the_socket_when_nothing_was_pre_read},
         {"refuses_headers_above_max_size", refuses_headers_above_max_size},
         {"enforces_the_deadline_against_a_trickling_client",
          enforces_the_deadline_against_a_trickling_client},
