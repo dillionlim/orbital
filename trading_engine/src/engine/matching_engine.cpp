@@ -59,8 +59,15 @@ void MatchingEngine::worker_loop() {
             e.kind = ExecutionReport::Kind::CancelAck;
             e.order_id = stp.order_id;
             e.symbol = stp.symbol;
+            e.side = stp.side;
             e.user_id = stp.user_id;
             e.status = OrderStatus::Cancelled;
+            // The cancelled order's real book state. Left at zero these fields
+            // overwrite the persisted row's filled_qty with 0 (see SqliteStore's
+            // UPSERT), so a partially filled order that gets cancelled reads back
+            // as if it had never traded.
+            e.remaining = stp.remaining;
+            e.total_filled = stp.filled;
             e.reason = stp.reason;
             e.ts = now_ms();
             // session_id unknown here; broadcaster will look up by user_id+order_id.
@@ -163,6 +170,15 @@ void MatchingEngine::worker_loop() {
             me.last_price = fill.price;
             me.last_quantity = fill.quantity;
             me.remaining = fill.maker_remaining;
+            // A resting order is always a limit sitting at the level it trades on,
+            // so its limit and its volume-weighted average fill price are both the
+            // fill price. Without these, SqliteStore's UPSERT writes the defaults
+            // (0) over the row's filled_qty and avg_price, and every maker order
+            // ends up persisted as "Filled, filled_qty 0".
+            me.type = OrderType::Limit;
+            me.limit_price = fill.price;
+            me.total_filled = fill.maker_filled;
+            me.avg_price = fill.price;
             me.trade_id = fill.trade_id;
             me.user_id = fill.maker_user_id;
             me.client_id = fill.maker_client_id;
@@ -213,6 +229,9 @@ void MatchingEngine::worker_loop() {
         if (co.ok) {
             e.kind = ExecutionReport::Kind::CancelAck;
             e.status = OrderStatus::Cancelled;
+            e.side = co.side;
+            e.remaining = co.remaining;
+            e.total_filled = co.filled;
             bus_.publish(e);
             publish_book_change();
         } else {

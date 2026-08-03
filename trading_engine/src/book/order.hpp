@@ -70,6 +70,7 @@ struct FillReport {
     Price price = 0.0;
     Quantity quantity = 0;
     Quantity maker_remaining = 0;   // maker's remaining qty AFTER this fill (0 = fully filled)
+    Quantity maker_filled = 0;      // maker's cumulative filled qty AFTER this fill
     OrderSide taker_side = OrderSide::Buy;
     Timestamp ts = 0;
     uint64_t trade_id = 0;          // assigned by MatchingEngine
@@ -84,6 +85,8 @@ struct CancelOutcome {
     SymbolId symbol = 0;
     std::string user_id;            // owner of the cancelled order
     Quantity remaining = 0;         // qty that was outstanding before cancel
+    Quantity filled = 0;            // qty already executed before cancel
+    OrderSide side = OrderSide::Buy; // side of the cancelled order
     std::string reason;             // empty on success
 };
 
