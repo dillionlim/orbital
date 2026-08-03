@@ -1,5 +1,6 @@
 #pragma once
 #include <atomic>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <unordered_map>
@@ -26,7 +27,13 @@ public:
 
     // Submit a place. Allocates an OrderId, pushes into the symbol's shard. Returns
     // 0 if the symbol is unknown or the shard queue is full.
-    OrderId submit_place(PlaceOrderCmd cmd);
+    //
+    // `on_id_assigned`, when set, runs with the freshly allocated OrderId *before*
+    // the command reaches the shard. That is the only window in which a caller can
+    // register per-order bookkeeping: the shard runs on its own thread and can
+    // match, publish, and be observed as terminal before submit_place() returns.
+    OrderId submit_place(PlaceOrderCmd cmd,
+                         const std::function<void(OrderId)>& on_id_assigned = {});
 
     // Submit a cancel. Returns false if the symbol cannot be located for the order
     // (engine sends Reject(reason="not_found") in that case from the shard side, but
@@ -36,16 +43,26 @@ public:
 
     [[nodiscard]] OrderId peek_next_order_id() const { return next_order_id_.load(); }
 
+    // Number of orders currently routable by cancel. Test seam: the routing map
+    // is private and its size is otherwise unobservable.
+    [[nodiscard]] size_t routable_orders() const;
+
 private:
+    // Drops an order from the routing map once it can no longer be cancelled.
+    void on_event(const OutboundEvent& ev);
+
     EventBus& bus_;
+    EventBus::SubscriberId sub_id_ = 0;
     std::shared_ptr<SymbolRegistry> registry_;
     std::atomic<OrderId> next_order_id_{1};
 
     // Shards by SymbolId.
     std::unordered_map<SymbolId, std::unique_ptr<MatchingEngine>> shards_;
 
-    // OrderId → SymbolId for cancel routing.
-    std::mutex order_index_mu_;
+    // OrderId → SymbolId for cancel routing. Entries live exactly as long as the
+    // order can still be cancelled: added on submit_place, dropped when the order
+    // reaches a terminal state (see on_event).
+    mutable std::mutex order_index_mu_;
     std::unordered_map<OrderId, SymbolId> order_to_symbol_;
 };
 
