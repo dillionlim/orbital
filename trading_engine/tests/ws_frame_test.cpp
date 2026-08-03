@@ -358,6 +358,140 @@ void passes_unknown_opcodes_through() {
     require_eq(opcode_byte(f.opcode), static_cast<uint8_t>(0xF), "opcode is only the low nibble");
 }
 
+// The bug this class exists for: read_http_headers reads in blocks, so a client
+// that pipelines its first frame behind the upgrade request has those bytes
+// consumed into the header buffer. Reading straight from the fd afterwards loses
+// the frame — it is never coming back off the socket.
+void replays_bytes_pre_read_with_the_headers() {
+    SocketPair sp;
+    const uint8_t key[4] = {0x3C, 0x5E, 0x71, 0x02};
+    const std::string headers =
+        "GET /ws HTTP/1.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n";
+
+    // Handshake and the first two frames arrive in one write, as they would in
+    // one TCP segment.
+    std::vector<uint8_t> wire(headers.begin(), headers.end());
+    for (const auto& frame : {masked_frame(true, WsOpcode::Text, "{\"t\":\"hello\"}", key),
+                              masked_frame(true, WsOpcode::Text, "second", key)}) {
+        wire.insert(wire.end(), frame.begin(), frame.end());
+    }
+    write_bytes(sp.wr, wire);
+    sp.close_wr();
+
+    std::string req;
+    require(read_http_headers(sp.rd, req, 65536, 1000), "headers should be read");
+    const size_t end = req.find("\r\n\r\n");
+    require(end != std::string::npos, "terminator present");
+    const std::string_view pipelined = std::string_view(req).substr(end + 4);
+    require(!pipelined.empty(), "the frames really did arrive with the headers");
+
+    WsReader reader(sp.rd, pipelined);
+    WsFrame f;
+    require(ws_read_frame(reader, f), "the pipelined frame should be recoverable");
+    require_eq(f.payload, std::string("{\"t\":\"hello\"}"), "first frame payload");
+    require(ws_read_frame(reader, f), "and so should the one after it");
+    require_eq(f.payload, std::string("second"), "second frame payload");
+}
+
+// A reader spanning the buffer boundary must stitch the two sources together
+// rather than short-read at the seam.
+void reads_across_the_buffer_and_socket_boundary() {
+    SocketPair sp;
+    const uint8_t key[4] = {0x0F, 0xA1, 0x3B, 0x77};
+    const auto frame = masked_frame(true, WsOpcode::Text, std::string(300, 'x'), key);
+
+    // Split the frame mid-payload: the head is "already read", the tail arrives
+    // on the socket.
+    const size_t split = 12;
+    const std::string head(frame.begin(), frame.begin() + split);
+    write_bytes(sp.wr, std::vector<uint8_t>(frame.begin() + split, frame.end()));
+    sp.close_wr();
+
+    WsReader reader(sp.rd, head);
+    WsFrame f;
+    require(ws_read_frame(reader, f), "a frame split across both sources should parse");
+    require_eq(f.payload, std::string(300, 'x'), "and its payload should be whole");
+}
+
+// With nothing pre-read the reader is just the socket, which is what the
+// existing int overload relies on.
+void reads_straight_from_the_socket_when_nothing_was_pre_read() {
+    SocketPair sp;
+    const uint8_t key[4] = {0x44, 0x55, 0x66, 0x77};
+    write_bytes(sp.wr, masked_frame(true, WsOpcode::Text, "plain", key));
+    sp.close_wr();
+
+    WsReader reader(sp.rd);
+    require(!reader.has_buffered(), "nothing is buffered");
+    WsFrame f;
+    require(ws_read_frame(reader, f), "the frame should parse");
+    require_eq(f.payload, std::string("plain"), "payload");
+}
+
+// RFC 6455 §5.5: a control frame must have FIN set. A fragmented one is a
+// protocol violation, and the connection is dropped rather than reassembled.
+void rejects_fragmented_control_frames() {
+    const uint8_t key[4] = {0x11, 0x22, 0x33, 0x44};
+    for (const auto op : {WsOpcode::Close, WsOpcode::Ping, WsOpcode::Pong}) {
+        SocketPair sp;
+        write_bytes(sp.wr, masked_frame(false, op, "frag", key));
+        sp.close_wr();
+
+        WsFrame f;
+        require(!ws_read_frame(sp.rd, f), "a fragmented control frame must be refused");
+    }
+
+    // The reserved control opcodes are policed the same way.
+    SocketPair reserved;
+    write_bytes(reserved.wr, build_frame(false, 0xB, "frag", true, key, 4, 7));
+    reserved.close_wr();
+    WsFrame f;
+    require(!ws_read_frame(reserved.rd, f),
+            "a fragmented reserved control frame must be refused");
+}
+
+// The other half of §5.5: control payloads stop at 125 bytes. Without this a
+// client could park an arbitrarily large ping payload in memory and have the
+// server echo it straight back as an equally invalid pong.
+void rejects_oversized_control_frames() {
+    const uint8_t key[4] = {0x55, 0x66, 0x77, 0x88};
+
+    // 125 is the largest legal control payload.
+    {
+        SocketPair sp;
+        write_bytes(sp.wr, masked_frame(true, WsOpcode::Ping, std::string(125, 'p'), key));
+        sp.close_wr();
+        WsFrame f;
+        require(ws_read_frame(sp.rd, f), "125 bytes is still a legal control payload");
+        require_eq(f.payload, std::string(125, 'p'), "and its payload survives");
+    }
+
+    // 126 is not, and neither is anything above it.
+    for (const size_t n : {size_t{126}, size_t{200}, size_t{70000}}) {
+        SocketPair sp;
+        write_bytes(sp.wr, masked_frame(true, WsOpcode::Ping, std::string(n, 'p'), key));
+        sp.close_wr();
+        WsFrame f;
+        require(!ws_read_frame(sp.rd, f), "an over-long control payload must be refused");
+    }
+
+}
+
+// Data frames keep their existing behaviour — the 125-byte rule is control-only.
+void still_accepts_large_and_fragmented_data_frames() {
+    const uint8_t key[4] = {0x99, 0xAA, 0xBB, 0xCC};
+    SocketPair sp;
+    write_bytes(sp.wr, masked_frame(true, WsOpcode::Text, std::string(4096, 'd'), key));
+    write_bytes(sp.wr, masked_frame(false, WsOpcode::Text, "frag", key));
+    sp.close_wr();
+
+    WsFrame f;
+    require(ws_read_frame(sp.rd, f), "a 4KB text frame is fine");
+    require_eq(f.payload.size(), static_cast<size_t>(4096), "its payload is intact");
+    require(ws_read_frame(sp.rd, f), "a fragmented text frame is fine");
+    require(!f.fin, "and still reports fin=false");
+}
+
 // A normal request ends at \r\n\r\n; the reader does not block waiting for a
 // body that has not arrived, and the socket stays usable afterwards.
 void reads_headers_terminated_by_crlfcrlf() {
@@ -499,9 +633,18 @@ const std::vector<TestCase>& test_cases() {
          parses_control_frames_and_zero_length_payloads},
         {"reports_the_fin_bit_for_fragmented_frames", reports_the_fin_bit_for_fragmented_frames},
         {"passes_unknown_opcodes_through", passes_unknown_opcodes_through},
+        {"rejects_fragmented_control_frames", rejects_fragmented_control_frames},
+        {"rejects_oversized_control_frames", rejects_oversized_control_frames},
+        {"still_accepts_large_and_fragmented_data_frames",
+         still_accepts_large_and_fragmented_data_frames},
         {"reads_headers_terminated_by_crlfcrlf", reads_headers_terminated_by_crlfcrlf},
         {"keeps_body_bytes_that_arrive_in_the_same_read",
          keeps_body_bytes_that_arrive_in_the_same_read},
+        {"replays_bytes_pre_read_with_the_headers", replays_bytes_pre_read_with_the_headers},
+        {"reads_across_the_buffer_and_socket_boundary",
+         reads_across_the_buffer_and_socket_boundary},
+        {"reads_straight_from_the_socket_when_nothing_was_pre_read",
+         reads_straight_from_the_socket_when_nothing_was_pre_read},
         {"refuses_headers_above_max_size", refuses_headers_above_max_size},
         {"enforces_the_deadline_against_a_trickling_client",
          enforces_the_deadline_against_a_trickling_client},

@@ -64,6 +64,7 @@ ApplyResult OrderBook::apply(const OrderInput& in) {
             .price           = level_price,
             .quantity        = match,
             .maker_remaining = maker.remaining() - match,  // post-fill residual
+            .maker_filled    = maker.filled + match,       // post-fill cumulative
             .taker_side      = in.side,
             .ts              = now_ms(),
             .trade_id        = 0,                          // assigned by MatchingEngine
@@ -90,6 +91,8 @@ ApplyResult OrderBook::apply(const OrderInput& in) {
                     .symbol    = in.symbol,
                     .user_id   = maker->user_id,
                     .remaining = maker->remaining(),
+                    .filled    = maker->filled,
+                    .side      = maker->side,
                     .reason    = "self_trade_prevention",
                 });
                 level.aggregate_qty -= maker->remaining();
@@ -192,6 +195,8 @@ CancelOutcome OrderBook::cancel(OrderId id, std::string_view user_id_must_match)
     out.symbol = o->symbol;
     out.user_id = o->user_id;
     out.remaining = o->remaining();
+    out.filled = o->filled;
+    out.side = o->side;
     erase_resting(o);
     return out;
 }
