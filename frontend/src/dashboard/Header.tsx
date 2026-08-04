@@ -10,7 +10,7 @@ import { CustomDropdown } from './CustomDropdown';
 import { setCurrentServer as broadcastCurrentServer } from '../hooks/useCurrentServer';
 import { replayOnboarding } from '../hooks/useOnboarding';
 import BubblesIcon from '../ui/BubblesIcon';
-import { httpBase, DEFAULT_SERVER } from '../services/engineUrl';
+import { engineFetch, DEFAULT_SERVER } from '../services/engineUrl';
 
 const KEY_CURRENT = 'currentServer';
 const KEY_SERVERS = 'servers';
@@ -61,7 +61,7 @@ export const Header: React.FC = () => {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 3000);
 
-      const response = await fetch(`${httpBase(ip)}/health?_t=${Date.now()}`, {
+      const response = await engineFetch(ip, `/health?_t=${Date.now()}`, {
         method: 'GET',
         signal: controller.signal
       });

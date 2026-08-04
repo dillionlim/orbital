@@ -4,7 +4,7 @@ import { Filter, ChevronDown, Check, Info } from 'lucide-react';
 import { useCurrentServer } from '../hooks/useCurrentServer';
 import { useEngineUserId } from '../hooks/useEngineUserId';
 import { supabase } from '../lib/supabase';
-import { httpBase } from '../services/engineUrl';
+import { engineFetch } from '../services/engineUrl';
 
 interface LeaderRow {
   user_id: string;
@@ -98,7 +98,7 @@ export const PnLCharts: React.FC = () => {
       try {
         const ctrl = new AbortController();
         const t = setTimeout(() => ctrl.abort(), 4000);
-        const res = await fetch(`${httpBase(server)}/leaderboard`, { signal: ctrl.signal });
+        const res = await engineFetch(server, '/leaderboard', { signal: ctrl.signal });
         clearTimeout(t);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json() as { leaderboard: LeaderRow[] };

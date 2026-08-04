@@ -14,7 +14,8 @@ std::string http_cors_preflight() {
         << "Access-Control-Allow-Origin: *\r\n"
         << "Access-Control-Allow-Methods: GET, POST, DELETE, OPTIONS\r\n"
         << "Access-Control-Allow-Headers: Origin, Content-Type, Authorization, Api-Key, Accept, "
-           "Access-Control-Request-Method, Access-Control-Request-Headers, Cache-Control, Pragma\r\n"
+           "Bypass-Tunnel-Reminder, Access-Control-Request-Method, "
+           "Access-Control-Request-Headers, Cache-Control, Pragma\r\n"
         << "Access-Control-Max-Age: 86400\r\n"
         << "Access-Control-Allow-Credentials: false\r\n"
         << "Connection: close\r\n\r\n";
@@ -41,7 +42,7 @@ std::string http_response(int status_code, std::string_view body, std::string_vi
         << "Access-Control-Allow-Origin: *\r\n"
         << "Access-Control-Allow-Methods: GET, POST, DELETE, OPTIONS\r\n"
         << "Access-Control-Allow-Headers: Origin, Content-Type, Authorization, Api-Key, Accept, "
-           "Cache-Control, Pragma\r\n"
+           "Bypass-Tunnel-Reminder, Cache-Control, Pragma\r\n"
         << "Access-Control-Allow-Credentials: false\r\n"
         << "Connection: close\r\n\r\n"
         << body;

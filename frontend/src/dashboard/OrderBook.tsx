@@ -6,7 +6,7 @@ import { useEngineStream } from '../hooks/useEngineStream';
 import { useCurrentServer } from '../hooks/useCurrentServer';
 import { useSymbols } from '../services/symbols';
 import type { EngineBookMessage, EngineBookDeltaMessage } from '../services/engineStream';
-import { httpBase } from '../services/engineUrl';
+import { engineFetch } from '../services/engineUrl';
 import {
   DEPTH_LEVELS,
   applyDelta,
@@ -120,7 +120,7 @@ export const OrderBook: React.FC = () => {
       // would 401 us — which used to nuke the user's API key and pop a
       // "Re-authenticating…" flash on the dashboard. Skip the auth entirely;
       // there's nothing the key would unlock for this endpoint.
-      const response = await fetch(`${httpBase(server)}/orderbook?symbol=${symbolParam}`, {
+      const response = await engineFetch(server, `/orderbook?symbol=${symbolParam}`, {
         method: 'GET',
         headers: { 'Content-Type': 'application/json' },
         signal: controller.signal,

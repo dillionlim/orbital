@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { X, Save, AlertCircle, CheckCircle, Loader2 } from 'lucide-react';
-import { httpBase } from '../services/engineUrl';
+import { engineFetch } from '../services/engineUrl';
 
 interface AddServerModalProps {
   onClose: () => void;
@@ -28,7 +28,7 @@ export const AddServerModal: React.FC<AddServerModalProps> = ({ onClose, onSave,
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 3000);
 
-      const response = await fetch(`${httpBase(ip)}/health?_t=${Date.now()}`, {
+      const response = await engineFetch(ip, `/health?_t=${Date.now()}`, {
         method: 'GET',
         signal: controller.signal
       });

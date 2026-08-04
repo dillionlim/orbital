@@ -8,7 +8,7 @@
 
 import { useEffect, useState } from 'react';
 import { useCurrentServer } from '../hooks/useCurrentServer';
-import { httpBase } from './engineUrl';
+import { engineFetch } from './engineUrl';
 
 export interface EngineSymbol {
   name: string;
@@ -30,7 +30,7 @@ export async function fetchSymbols(server: string): Promise<EngineSymbol[]> {
     try {
       const ctrl = new AbortController();
       const t = setTimeout(() => ctrl.abort(), 4000);
-      const res = await fetch(`${httpBase(server)}/symbols`, { signal: ctrl.signal });
+      const res = await engineFetch(server, '/symbols', { signal: ctrl.signal });
       clearTimeout(t);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const j = (await res.json()) as { symbols?: EngineSymbol[] };

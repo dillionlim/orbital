@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { DEFAULT_SERVER, httpBase, wsBase } from './engineUrl';
+import { DEFAULT_SERVER, engineFetch, httpBase, wsBase } from './engineUrl';
 
 // The engine is addressed as a bare `host[:port]`, so the scheme is chosen at
 // call time from how the *page* is served. Get this wrong on a hosted dashboard
@@ -47,5 +47,26 @@ describe('engineUrl', () => {
   it('defaults to the local engine when no build-time server is configured', () => {
     expect(process.env.NEXT_PUBLIC_DEFAULT_SERVER).toBeUndefined();
     expect(DEFAULT_SERVER).toBe('localhost:9090');
+  });
+
+  it('bypasses the reminder only for LocalTunnel engine requests', async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue({} as Response);
+    vi.stubGlobal('fetch', fetchMock);
+
+    await engineFetch('private-engine.loca.lt', '/health', {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+    });
+    const [tunnelUrl, tunnelInit] = fetchMock.mock.calls[0];
+    const tunnelHeaders = new Headers(tunnelInit?.headers);
+    expect(tunnelUrl).toBe('http://private-engine.loca.lt/health');
+    expect(tunnelHeaders.get('Accept')).toBe('application/json');
+    expect(tunnelHeaders.get('bypass-tunnel-reminder')).toBe('true');
+
+    await engineFetch('engine.example.com', '/health');
+    const [regularUrl, regularInit] = fetchMock.mock.calls[1];
+    const regularHeaders = new Headers(regularInit?.headers);
+    expect(regularUrl).toBe('http://engine.example.com/health');
+    expect(regularHeaders.has('bypass-tunnel-reminder')).toBe(false);
   });
 });

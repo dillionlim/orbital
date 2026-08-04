@@ -12,6 +12,26 @@ export function httpBase(server: string): string {
   return `${secure() ? 'https' : 'http'}://${server}`;
 }
 
+function isLocalTunnel(server: string): boolean {
+  const hostname = server.toLowerCase().split(':', 1)[0];
+  return hostname.endsWith('.loca.lt') || hostname.endsWith('.localtunnel.me');
+}
+
+// LocalTunnel puts browser requests behind a reminder page. Its supported
+// opt-out is the bypass-tunnel-reminder header. Apply it only to LocalTunnel
+// hosts so ordinary engines keep making simple (non-preflighted) GET requests.
+export function engineFetch(
+  server: string,
+  path: string,
+  init: RequestInit = {},
+): Promise<Response> {
+  const headers = new Headers(init.headers);
+  if (isLocalTunnel(server)) {
+    headers.set('bypass-tunnel-reminder', 'true');
+  }
+  return fetch(`${httpBase(server)}${path}`, { ...init, headers });
+}
+
 export function wsBase(server: string): string {
   return `${secure() ? 'wss' : 'ws'}://${server}`;
 }
