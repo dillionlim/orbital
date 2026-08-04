@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Card } from '../ui/Card';
 import { useApiKey } from '../hooks/useApiKey';
 import { useCurrentServer } from '../hooks/useCurrentServer';
-import { httpBase } from '../services/engineUrl';
+import { engineFetch } from '../services/engineUrl';
 
 interface Fill {
   trade_id: number;
@@ -53,7 +53,7 @@ export const MyTrades: React.FC = () => {
       try {
         const ctrl = new AbortController();
         const t = setTimeout(() => ctrl.abort(), 4000);
-        const res = await fetch(`${httpBase(server)}/me/fills?limit=50`, {
+        const res = await engineFetch(server, '/me/fills?limit=50', {
           headers: { 'Api-Key': apiKey },
           signal: ctrl.signal,
         });
